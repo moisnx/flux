@@ -108,6 +108,10 @@ int main(int argc, char *argv[]) {
     auto def = ThemeLoader::loadFromTOML(*theme_path);
     std::cerr << def.background << std::endl;
     theme = theme_manager.applyThemeDefinition(def);
+    if (def.background != "transparent" && def.background != "default" &&
+        !def.background.empty()) {
+      bkgd(COLOR_PAIR(theme.background));
+    }
   } else {
     std::cerr << "Theme '" << theme_name << "' not found, using default\n";
     theme = theme_manager.applyThemeDefinition(

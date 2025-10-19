@@ -118,6 +118,9 @@ Theme ThemeManager::applyThemeDefinition(const ThemeDefinition &def) {
   // We start from pair 20 to avoid conflicts
   int pair_base = 20;
 
+  // Set the default background/foreground
+  assume_default_colors(fg, bg);
+
   init_pair(pair_base + 0, fg, bg);        // background/foreground
   init_pair(pair_base + 1, fg, sel);       // selected
   init_pair(pair_base + 2, dir, bg);       // directory
