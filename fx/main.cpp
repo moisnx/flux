@@ -23,7 +23,8 @@ void restore_terminal_attributes();
 struct termios original_termios;
 #endif
 
-void printUsage(const char *program_name) {
+void printUsage(const char *program_name)
+{
   std::cout << "Flux - A modern terminal file browser\n\n";
   std::cout << "Usage: " << program_name << " [OPTIONS] [PATH]\n\n";
   std::cout << "Options:\n";
@@ -43,33 +44,49 @@ void printUsage(const char *program_name) {
   std::cout << "  q                Quit\n";
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
   // Parse command line arguments
   std::string start_path = ".";
-  std::string theme_name = "dracula"; // Remove .toml extension
+  std::string theme_name = "dracula";
   bool use_icons = true;
 
-  for (int i = 1; i < argc; ++i) {
+  for (int i = 1; i < argc; ++i)
+  {
     std::string arg = argv[i];
 
-    if (arg == "-h" || arg == "--help") {
+    if (arg == "-h" || arg == "--help")
+    {
       printUsage(argv[0]);
       return 0;
-    } else if (arg == "-v" || arg == "--version") {
+    }
+    else if (arg == "-v" || arg == "--version")
+    {
       std::cout << "fx (Flux) version " << flux::getVersion() << "\n";
       return 0;
-    } else if (arg == "--theme") {
-      if (i + 1 < argc) {
+    }
+    else if (arg == "--theme")
+    {
+      if (i + 1 < argc)
+      {
         theme_name = argv[++i];
-      } else {
+      }
+      else
+      {
         std::cerr << "Error: --theme requires an argument\n";
         return 1;
       }
-    } else if (arg == "--no-icons") {
+    }
+    else if (arg == "--no-icons")
+    {
       use_icons = false;
-    } else if (arg[0] != '-') {
+    }
+    else if (arg[0] != '-')
+    {
       start_path = arg;
-    } else {
+    }
+    else
+    {
       std::cerr << "Unknown option: " << arg << "\n";
       std::cerr << "Try '" << argv[0] << " --help' for more information.\n";
       return 1;
@@ -81,14 +98,15 @@ int main(int argc, char *argv[]) {
 
   setup_terminal_attributes();
 
-  // Initialize ncurses AFTER loading theme
+  // Initialize ncurses
   initscr();
   cbreak();
   noecho();
   keypad(stdscr, TRUE);
   curs_set(0); // Hide cursor
 
-  if (has_colors()) {
+  if (has_colors())
+  {
     start_color();
     use_default_colors();
   }
@@ -97,35 +115,60 @@ int main(int argc, char *argv[]) {
   flux::Browser browser(start_path);
   flux::Renderer renderer;
 
+  // IMPORTANT: Create ThemeManager in STANDALONE mode (default)
   flux::ThemeManager theme_manager;
+  // theme_manager.setEmbeddedMode(false); // This is the default
+
   flux::Theme theme;
 
+  // Load theme from file
   auto theme_path = fx::ThemeLoader::findThemeFile(theme_name);
-  if (theme_path) {
+  if (theme_path)
+  {
     std::cerr << "Loading theme from: " << *theme_path << "\n";
     auto def = fx::ThemeLoader::loadFromTOML(*theme_path);
-    std::cerr << def.background << std::endl;
+    std::cerr << "Background: " << def.background << std::endl;
+
+    // Apply theme - this WILL call init_pair() in standalone mode
     theme = theme_manager.applyThemeDefinition(def);
+
+    // Set background if theme specifies one
     if (def.background != "transparent" && def.background != "default" &&
-        !def.background.empty()) {
+        !def.background.empty())
+    {
       bkgd(COLOR_PAIR(theme.background));
     }
-  } else {
+  }
+  else
+  {
     std::cerr << "Theme '" << theme_name << "' not found, using default\n";
     theme = theme_manager.applyThemeDefinition(
         flux::ThemeManager::getDefaultThemeDef());
+    bkgd(COLOR_PAIR(theme.background));
   }
 
   renderer.setTheme(theme);
-  bkgd(COLOR_PAIR(theme.background));
+
+  // Set icon style
+  if (use_icons)
+  {
+    renderer.setIconStyle(IconStyle::AUTO);
+  }
+  else
+  {
+    renderer.setIconStyle(IconStyle::ASCII);
+  }
 
   int ch;
   bool running = true;
-  while (running) {
+  while (running)
+  {
     browser.updateScroll(renderer.getViewportHeight());
     renderer.render(browser);
     ch = getch();
-    switch (ch) {
+
+    switch (ch)
+    {
     case KEY_UP:
     case 'k':
       browser.selectPrevious();
@@ -165,6 +208,7 @@ int main(int argc, char *argv[]) {
     case KEY_F(5):
       browser.refresh();
       break;
+    case 'q':
     case CTRL('q'):
     case 27:
       running = false;
@@ -175,11 +219,16 @@ int main(int argc, char *argv[]) {
     case KEY_RIGHT:
     case KEY_ENTER:
     case 10:
-    case 13: {
-      if (browser.isSelectedDirectory()) {
+    case 13:
+    {
+      if (browser.isSelectedDirectory())
+      {
         browser.navigateInto(browser.getSelectedIndex());
-      } else {
-
+      }
+      else
+      {
+        // In standalone mode, just show selection
+        // You could add file opening here
         break;
       }
       break;
@@ -189,11 +238,11 @@ int main(int argc, char *argv[]) {
 
   endwin();
   restore_terminal_attributes();
-  clear();
   return 0;
 }
 
-void setup_terminal_attributes() {
+void setup_terminal_attributes()
+{
 #ifndef _WIN32
   // Get current terminal settings and store them
   tcgetattr(STDIN_FILENO, &original_termios);
@@ -207,7 +256,8 @@ void setup_terminal_attributes() {
 #endif
 }
 
-void restore_terminal_attributes() {
+void restore_terminal_attributes()
+{
 #ifndef _WIN32
   // Restore the original terminal settings
   tcsetattr(STDIN_FILENO, TCSANOW, &original_termios);

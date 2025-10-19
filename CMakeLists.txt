@@ -10,6 +10,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(BUILD_STANDALONE "Build standalone flux binary" ON)
 option(BUILD_EXAMPLES "Build example programs" ON)
 option(BUILD_SHARED_LIBS "Build as shared library" OFF)
+option(FLUX_INSTALL "Enable installation" ON)
 
 # ============================================
 # Platform-Specific Settings
@@ -29,7 +30,8 @@ endif()
 # ============================================
 # Find ncurses/ncursesw
 # ============================================
-set(DEPS_DIR ${CMAKE_SOURCE_DIR}/deps)
+# Use PROJECT_SOURCE_DIR instead of CMAKE_SOURCE_DIR for proper subproject support
+set(DEPS_DIR ${PROJECT_SOURCE_DIR}/deps)
 
 if(WIN32)
     # Windows: Use PDCursesMod with UTF-8 support
@@ -141,13 +143,16 @@ else()
     add_library(flux STATIC ${FLUX_ALL_SOURCES})
 endif()
 
+# Add alias for consistent target naming
+add_library(Flux::flux ALIAS flux)
+
 # Library properties
 target_include_directories(flux
     PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
     PRIVATE
-    ${CMAKE_SOURCE_DIR}/src
+    ${PROJECT_SOURCE_DIR}/src
     ${CURSES_INCLUDE_DIRS}
 )
 
@@ -200,24 +205,26 @@ if(BUILD_STANDALONE)
     target_link_libraries(fx PRIVATE flux)
 
     target_include_directories(fx PRIVATE
-        ${CMAKE_SOURCE_DIR}/include
-        ${CMAKE_SOURCE_DIR}/fx
+        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/fx
     )
 
-    # Install binary
-    install(TARGETS fx
-        RUNTIME DESTINATION bin
-    )
+    # Install binary only if installation is enabled
+    if(FLUX_INSTALL)
+        install(TARGETS fx
+            RUNTIME DESTINATION bin
+        )
 
-    # Install default config and themes
-    install(DIRECTORY fx/themes/
-        DESTINATION share/flux/themes
-    )
+        # Install default config and themes
+        install(DIRECTORY fx/themes/
+            DESTINATION share/flux/themes
+        )
 
-    install(FILES fx/config/default.yaml
-        DESTINATION share/flux
-        RENAME config.yaml
-    )
+        install(FILES fx/config/default.yaml
+            DESTINATION share/flux
+            RENAME config.yaml
+        )
+    endif()
 endif()
 
 # ============================================
@@ -228,63 +235,71 @@ endif()
 #     # Simple embedding example
 #     add_executable(example_simple examples/embed_simple.cpp)
 #     target_link_libraries(example_simple PRIVATE flux)
-#     target_include_directories(example_simple PRIVATE ${CMAKE_SOURCE_DIR}/include)
+#     target_include_directories(example_simple PRIVATE ${PROJECT_SOURCE_DIR}/include)
 
 #     # Custom theme example
 #     add_executable(example_theme examples/embed_custom_theme.cpp)
 #     target_link_libraries(example_theme PRIVATE flux)
-#     target_include_directories(example_theme PRIVATE ${CMAKE_SOURCE_DIR}/include)
+#     target_include_directories(example_theme PRIVATE ${PROJECT_SOURCE_DIR}/include)
 
 #     # File picker example
 #     add_executable(example_picker examples/file_picker.cpp)
 #     target_link_libraries(example_picker PRIVATE flux)
-#     target_include_directories(example_picker PRIVATE ${CMAKE_SOURCE_DIR}/include)
+#     target_include_directories(example_picker PRIVATE ${PROJECT_SOURCE_DIR}/include)
 # endif()
 
 # ============================================
-# Installation
+# Installation (Only if enabled and standalone build)
 # ============================================
 
-# Install library
-install(TARGETS flux
-    EXPORT FluxTargets
-    LIBRARY DESTINATION lib
-    ARCHIVE DESTINATION lib
-    RUNTIME DESTINATION bin
-    INCLUDES DESTINATION include
-)
+if(FLUX_INSTALL)
+    # Install library
+    install(TARGETS flux
+        EXPORT FluxTargets
+        LIBRARY DESTINATION lib
+        ARCHIVE DESTINATION lib
+        RUNTIME DESTINATION bin
+        INCLUDES DESTINATION include
+    )
 
-# Install headers
-install(DIRECTORY include/flux
-    DESTINATION include
-)
+    # Install headers
+    install(DIRECTORY include/flux
+        DESTINATION include
+    )
 
-# Install CMake config files
-install(EXPORT FluxTargets
-    FILE FluxTargets.cmake
-    NAMESPACE Flux::
-    DESTINATION lib/cmake/flux
-)
+    # Install CMake config files
+    install(EXPORT FluxTargets
+        FILE FluxTargets.cmake
+        NAMESPACE Flux::
+        DESTINATION lib/cmake/flux
+    )
 
-# Create and install config file
-include(CMakePackageConfigHelpers)
-write_basic_package_version_file(
-    "${CMAKE_CURRENT_BINARY_DIR}/FluxConfigVersion.cmake"
-    VERSION ${PROJECT_VERSION}
-    COMPATIBILITY AnyNewerVersion
-)
+    # Create and install config file
+    include(CMakePackageConfigHelpers)
+    write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/FluxConfigVersion.cmake"
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY AnyNewerVersion
+    )
 
-configure_package_config_file(
-    "${CMAKE_SOURCE_DIR}/cmake/FluxConfig.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/FluxConfig.cmake"
-    INSTALL_DESTINATION lib/cmake/flux
-)
+    # FIXED: Use PROJECT_SOURCE_DIR instead of CMAKE_SOURCE_DIR
+    # This ensures it works both standalone and as a subdirectory
+    if(EXISTS "${PROJECT_SOURCE_DIR}/cmake/FluxConfig.cmake.in")
+        configure_package_config_file(
+            "${PROJECT_SOURCE_DIR}/cmake/FluxConfig.cmake.in"
+            "${CMAKE_CURRENT_BINARY_DIR}/FluxConfig.cmake"
+            INSTALL_DESTINATION lib/cmake/flux
+        )
 
-install(FILES
-    "${CMAKE_CURRENT_BINARY_DIR}/FluxConfig.cmake"
-    "${CMAKE_CURRENT_BINARY_DIR}/FluxConfigVersion.cmake"
-    DESTINATION lib/cmake/flux
-)
+        install(FILES
+            "${CMAKE_CURRENT_BINARY_DIR}/FluxConfig.cmake"
+            "${CMAKE_CURRENT_BINARY_DIR}/FluxConfigVersion.cmake"
+            DESTINATION lib/cmake/flux
+        )
+    else()
+        message(WARNING "FluxConfig.cmake.in not found, skipping CMake config installation")
+    endif()
+endif()
 
 # ============================================
 # Build Summary

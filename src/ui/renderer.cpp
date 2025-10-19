@@ -5,20 +5,30 @@
 #include <iomanip>
 #include <sstream>
 
-namespace flux {
+namespace flux
+{
 
 Renderer::Renderer()
     : height_(0), width_(0), viewport_height_(0),
       theme_(createDefaultTheme()), // Use default theme initially
-      icon_provider_(IconStyle::AUTO) {}
+      icon_provider_(IconStyle::AUTO)
+{
+}
 
-void Renderer::setTheme(const Theme &theme) { theme_ = theme; }
+void Renderer::setTheme(const Theme &theme)
+{
+  theme_ = theme;
+  // REMOVED: Do NOT call init_pair() here
+  // The theme just contains COLOR_PAIR indices that are already initialized
+}
 
-void Renderer::setIconStyle(IconStyle style) {
+void Renderer::setIconStyle(IconStyle style)
+{
   icon_provider_ = IconProvider(style);
 }
 
-void Renderer::render(const Browser &browser) {
+void Renderer::render(const Browser &browser)
+{
   getmaxyx(stdscr, height_, width_);
   viewport_height_ = std::max(1, height_ - 4);
 
@@ -29,7 +39,8 @@ void Renderer::render(const Browser &browser) {
   refresh();
 }
 
-void Renderer::renderHeader(const Browser &browser) {
+void Renderer::renderHeader(const Browser &browser)
+{
   // Top bar with title
   attron(COLOR_PAIR(theme_.status_bar));
   mvprintw(0, 0, " ");
@@ -42,11 +53,14 @@ void Renderer::renderHeader(const Browser &browser) {
   size_t dirs = browser.getDirectoryCount();
   size_t files = browser.getFileCount();
   printw("  ");
+
+  // Switch to secondary color for metadata
+  attroff(COLOR_PAIR(theme_.status_bar));
   attron(COLOR_PAIR(theme_.ui_secondary));
   printw("%zu dirs, %zu files", dirs, files);
   attroff(COLOR_PAIR(theme_.ui_secondary));
-
   attron(COLOR_PAIR(theme_.status_bar));
+
   clrtoeol();
   attroff(COLOR_PAIR(theme_.status_bar));
 
@@ -57,7 +71,8 @@ void Renderer::renderHeader(const Browser &browser) {
   std::string path = browser.getCurrentPath().string();
   int max_path_len = width_ - 6;
 
-  if (path.length() > static_cast<size_t>(max_path_len)) {
+  if (path.length() > static_cast<size_t>(max_path_len))
+  {
     path = "..." + path.substr(path.length() - (max_path_len - 3));
   }
 
@@ -66,7 +81,8 @@ void Renderer::renderHeader(const Browser &browser) {
   attroff(COLOR_PAIR(theme_.ui_border));
 }
 
-void Renderer::renderFileList(const Browser &browser) {
+void Renderer::renderFileList(const Browser &browser)
+{
   const auto &entries = browser.getEntries();
   size_t selected = browser.getSelectedIndex();
   size_t scroll = browser.getScrollOffset();
@@ -74,7 +90,8 @@ void Renderer::renderFileList(const Browser &browser) {
   int start_y = 2;
   size_t visible_end = std::min(scroll + viewport_height_, entries.size());
 
-  for (size_t i = scroll; i < visible_end; ++i) {
+  for (size_t i = scroll; i < visible_end; ++i)
+  {
     int y = start_y + (i - scroll);
     const auto &entry = entries[i];
     bool is_selected = (i == selected);
@@ -86,49 +103,77 @@ void Renderer::renderFileList(const Browser &browser) {
     bool use_bold = false;
     std::string icon;
 
-    if (entry.is_directory) {
-      if (entry.name == "..") {
+    if (entry.is_directory)
+    {
+      if (entry.name == "..")
+      {
         icon = icon_provider_.getParentIcon();
         name_color = theme_.parent_dir;
         use_bold = true;
-      } else {
+      }
+      else
+      {
         icon = icon_provider_.getDirectoryIcon();
         name_color = theme_.directory;
         use_bold = true;
       }
-    } else if (entry.is_executable) {
+    }
+    else if (entry.is_executable)
+    {
       icon = icon_provider_.getExecutableIcon();
       name_color = theme_.executable;
       use_bold = true;
-    } else if (entry.is_symlink) {
+    }
+    else if (entry.is_symlink)
+    {
       icon = icon_provider_.getSymlinkIcon();
       name_color = theme_.symlink;
-    } else if (entry.is_hidden) {
+    }
+    else if (entry.is_hidden)
+    {
       icon = icon_provider_.getHiddenIcon();
       name_color = theme_.hidden;
-    } else {
+    }
+    else
+    {
       // Use file extension-based icon
       icon = icon_provider_.getFileIcon(entry.name);
+      // For regular files, use foreground color
+      name_color = theme_.foreground;
     }
 
-    // Selection styling
-    if (is_selected) {
+    // Selection styling - this is where the background comes from
+    if (is_selected)
+    {
+      // Selected items use the selection color pair for the whole line
       attron(COLOR_PAIR(theme_.selected));
       printw(" %s ", icon.c_str());
 
-      if (use_bold) {
+      // Name gets special styling but still on selected background
+      if (use_bold)
+      {
+        // Use the name's semantic color WITH reverse for visibility
         attron(COLOR_PAIR(name_color) | A_BOLD | A_REVERSE);
-      } else {
+      }
+      else
+      {
         attron(COLOR_PAIR(name_color) | A_REVERSE);
       }
-    } else {
+    }
+    else
+    {
+      // Non-selected items: icon in secondary, name in semantic color
+      // CRITICAL: No background override here - uses terminal default
       attron(COLOR_PAIR(theme_.ui_secondary));
       printw(" %s ", icon.c_str());
       attroff(COLOR_PAIR(theme_.ui_secondary));
 
-      if (use_bold) {
+      if (use_bold)
+      {
         attron(COLOR_PAIR(name_color) | A_BOLD);
-      } else {
+      }
+      else
+      {
         attron(COLOR_PAIR(name_color));
       }
     }
@@ -137,7 +182,8 @@ void Renderer::renderFileList(const Browser &browser) {
     int max_name_width = width_ - 18;
     std::string display_name = entry.name;
 
-    if (display_name.length() > static_cast<size_t>(max_name_width)) {
+    if (display_name.length() > static_cast<size_t>(max_name_width))
+    {
       display_name = display_name.substr(0, max_name_width - 3) + "...";
     }
 
@@ -149,68 +195,90 @@ void Renderer::renderFileList(const Browser &browser) {
     int target_x = width_ - size_width;
 
     // Fill space between name and size
-    if (is_selected) {
-      for (int p = current_x; p < target_x; ++p) {
+    if (is_selected)
+    {
+      // Keep selection highlighting across the gap
+      for (int p = current_x; p < target_x; ++p)
+      {
         addch(' ');
       }
-    } else {
-      if (use_bold) {
+    }
+    else
+    {
+      // Turn off name color for the gap
+      if (use_bold)
+      {
         attroff(COLOR_PAIR(name_color) | A_BOLD);
-      } else {
+      }
+      else
+      {
         attroff(COLOR_PAIR(name_color));
       }
 
-      for (int p = current_x; p < target_x; ++p) {
+      // Gap uses default background
+      for (int p = current_x; p < target_x; ++p)
+      {
         addch(' ');
       }
     }
 
     // Print size info
-    if (is_selected) {
+    if (is_selected)
+    {
       attroff(COLOR_PAIR(name_color) | A_REVERSE | A_BOLD);
       attron(COLOR_PAIR(theme_.selected));
     }
 
     attron(COLOR_PAIR(theme_.ui_secondary));
 
-    if (!entry.is_directory && entry.name != "..") {
+    if (!entry.is_directory && entry.name != "..")
+    {
       printw("%10s", formatSize(entry.size).c_str());
-    } else if (entry.is_directory && entry.name != "..") {
+    }
+    else if (entry.is_directory && entry.name != "..")
+    {
       printw("     <DIR>");
-    } else {
+    }
+    else
+    {
       printw("          ");
     }
 
     attroff(COLOR_PAIR(theme_.ui_secondary));
 
-    if (is_selected) {
+    if (is_selected)
+    {
       addch(' ');
       attroff(COLOR_PAIR(theme_.selected));
     }
 
-    clrtoeol();
+    clrtoeol(); // Clear to end of line using current background
   }
 
-  // Clear remaining viewport
-  for (int y = start_y + (visible_end - scroll); y < height_ - 2; ++y) {
+  // Clear remaining viewport - uses terminal default background
+  for (int y = start_y + (visible_end - scroll); y < height_ - 2; ++y)
+  {
     move(y, 0);
     clrtoeol();
   }
 }
 
-void Renderer::renderStatus(const Browser &browser) {
+void Renderer::renderStatus(const Browser &browser)
+{
   int status_y = height_ - 2;
 
   // Subtle separator
   attron(COLOR_PAIR(theme_.ui_border));
   move(status_y - 1, 0);
-  for (int i = 0; i < width_; ++i) {
+  for (int i = 0; i < width_; ++i)
+  {
     addch(ACS_HLINE);
   }
   attroff(COLOR_PAIR(theme_.ui_border));
 
   // Status line
-  if (browser.hasError()) {
+  if (browser.hasError())
+  {
     move(status_y, 0);
     attron(COLOR_PAIR(theme_.ui_error));
     printw(" ! ");
@@ -219,7 +287,9 @@ void Renderer::renderStatus(const Browser &browser) {
     attroff(A_BOLD);
     clrtoeol();
     attroff(COLOR_PAIR(theme_.ui_error));
-  } else {
+  }
+  else
+  {
     move(status_y, 0);
     attron(COLOR_PAIR(theme_.status_bar));
 
@@ -228,19 +298,26 @@ void Renderer::renderStatus(const Browser &browser) {
 
     // Position indicator
     printw(" ");
+
+    attroff(COLOR_PAIR(theme_.status_bar));
     attron(COLOR_PAIR(theme_.status_bar_active) | A_BOLD);
     printw("%zu", selected);
     attroff(COLOR_PAIR(theme_.status_bar_active) | A_BOLD);
     attron(COLOR_PAIR(theme_.status_bar));
+
     printw("/");
+
+    attroff(COLOR_PAIR(theme_.status_bar));
     attron(COLOR_PAIR(theme_.ui_secondary));
     printw("%zu", total);
     attroff(COLOR_PAIR(theme_.ui_secondary));
     attron(COLOR_PAIR(theme_.status_bar));
 
     // Flags
-    if (browser.getShowHidden()) {
+    if (browser.getShowHidden())
+    {
       printw("  ");
+      attroff(COLOR_PAIR(theme_.status_bar));
       attron(COLOR_PAIR(theme_.ui_warning));
       printw("[hidden]");
       attroff(COLOR_PAIR(theme_.ui_warning));
@@ -249,13 +326,17 @@ void Renderer::renderStatus(const Browser &browser) {
 
     // Sort mode
     printw("  ");
+    attroff(COLOR_PAIR(theme_.status_bar));
     attron(COLOR_PAIR(theme_.ui_secondary));
     printw("sort:");
     attroff(COLOR_PAIR(theme_.ui_secondary));
     attron(COLOR_PAIR(theme_.status_bar));
     printw(" ");
+
+    attroff(COLOR_PAIR(theme_.status_bar));
     attron(COLOR_PAIR(theme_.status_bar_active));
-    switch (browser.getSortMode()) {
+    switch (browser.getSortMode())
+    {
     case Browser::SortMode::NAME:
       printw("name");
       break;
@@ -270,6 +351,7 @@ void Renderer::renderStatus(const Browser &browser) {
       break;
     }
     attroff(COLOR_PAIR(theme_.status_bar_active));
+    attron(COLOR_PAIR(theme_.status_bar));
 
     clrtoeol();
     attroff(COLOR_PAIR(theme_.status_bar));
@@ -326,20 +408,25 @@ void Renderer::renderStatus(const Browser &browser) {
   attroff(COLOR_PAIR(theme_.ui_secondary));
 }
 
-std::string Renderer::formatSize(uintmax_t size) const {
+std::string Renderer::formatSize(uintmax_t size) const
+{
   const char *units[] = {"B", "K", "M", "G", "T"};
   int unit = 0;
   double s = static_cast<double>(size);
 
-  while (s >= 1024.0 && unit < 4) {
+  while (s >= 1024.0 && unit < 4)
+  {
     s /= 1024.0;
     unit++;
   }
 
   std::ostringstream oss;
-  if (unit == 0) {
+  if (unit == 0)
+  {
     oss << size << units[unit];
-  } else {
+  }
+  else
+  {
     oss << std::fixed << std::setprecision(1) << s << units[unit];
   }
 
