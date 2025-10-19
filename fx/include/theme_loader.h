@@ -6,6 +6,8 @@
 #include <flux.h>
 #include <string>
 
+namespace fx {
+
 class ThemeLoader {
 public:
   static flux::ThemeDefinition loadFromTOML(const std::string &path);
@@ -21,3 +23,4 @@ private:
                                        const std::string &key,
                                        const std::string &default_val);
 };
+} // namespace fx

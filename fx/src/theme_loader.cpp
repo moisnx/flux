@@ -1,7 +1,9 @@
-#include "theme_loader.h"
+#include "include/theme_loader.h"
 #include <fstream>
 #include <iostream>
 #include <sstream>
+
+namespace fx {
 
 flux::ThemeDefinition ThemeLoader::loadFromTOML(const std::string &path) {
   try {
@@ -122,3 +124,4 @@ ThemeLoader::findThemeFile(const std::string &theme_name) {
 
   return std::nullopt;
 }
+} // namespace fx

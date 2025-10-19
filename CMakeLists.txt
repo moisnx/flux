@@ -190,7 +190,7 @@ endif()
 if(BUILD_STANDALONE)
     set(STANDALONE_SOURCES
         fx/main.cpp
-        fx/theme_loader.cpp
+        fx/src/theme_loader.cpp
         # fx/app.cpp
         # fx/file_actions.cpp
     )

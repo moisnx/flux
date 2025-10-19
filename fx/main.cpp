@@ -1,6 +1,4 @@
-// Standalone file browser binary
-
-#include "theme_loader.h"
+#include "include/theme_loader.h"
 #include <cstdlib>
 #include <flux.h>
 #include <iostream>
@@ -102,10 +100,10 @@ int main(int argc, char *argv[]) {
   flux::ThemeManager theme_manager;
   flux::Theme theme;
 
-  auto theme_path = ThemeLoader::findThemeFile(theme_name);
+  auto theme_path = fx::ThemeLoader::findThemeFile(theme_name);
   if (theme_path) {
     std::cerr << "Loading theme from: " << *theme_path << "\n";
-    auto def = ThemeLoader::loadFromTOML(*theme_path);
+    auto def = fx::ThemeLoader::loadFromTOML(*theme_path);
     std::cerr << def.background << std::endl;
     theme = theme_manager.applyThemeDefinition(def);
     if (def.background != "transparent" && def.background != "default" &&
@@ -181,6 +179,7 @@ int main(int argc, char *argv[]) {
       if (browser.isSelectedDirectory()) {
         browser.navigateInto(browser.getSelectedIndex());
       } else {
+
         break;
       }
       break;
