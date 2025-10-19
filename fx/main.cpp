@@ -3,6 +3,10 @@
 #include <flux.h>
 #include <iostream>
 #include <locale>
+#ifdef _WIN32
+#include <shellapi.h> // For ShellExecute
+#include <windows.h>
+#endif
 
 #ifdef _WIN32
 #include <curses.h>
@@ -17,14 +21,13 @@
 
 void setup_terminal_attributes();
 void restore_terminal_attributes();
-
+void openFileWithDefaultApp(const std::string &filePath);
 // Global variable to store old terminal attributes
 #ifndef _WIN32
 struct termios original_termios;
 #endif
 
-void printUsage(const char *program_name)
-{
+void printUsage(const char *program_name) {
   std::cout << "Flux - A modern terminal file browser\n\n";
   std::cout << "Usage: " << program_name << " [OPTIONS] [PATH]\n\n";
   std::cout << "Options:\n";
@@ -44,49 +47,33 @@ void printUsage(const char *program_name)
   std::cout << "  q                Quit\n";
 }
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
   // Parse command line arguments
   std::string start_path = ".";
   std::string theme_name = "dracula";
   bool use_icons = true;
 
-  for (int i = 1; i < argc; ++i)
-  {
+  for (int i = 1; i < argc; ++i) {
     std::string arg = argv[i];
 
-    if (arg == "-h" || arg == "--help")
-    {
+    if (arg == "-h" || arg == "--help") {
       printUsage(argv[0]);
       return 0;
-    }
-    else if (arg == "-v" || arg == "--version")
-    {
+    } else if (arg == "-v" || arg == "--version") {
       std::cout << "fx (Flux) version " << flux::getVersion() << "\n";
       return 0;
-    }
-    else if (arg == "--theme")
-    {
-      if (i + 1 < argc)
-      {
+    } else if (arg == "--theme") {
+      if (i + 1 < argc) {
         theme_name = argv[++i];
-      }
-      else
-      {
+      } else {
         std::cerr << "Error: --theme requires an argument\n";
         return 1;
       }
-    }
-    else if (arg == "--no-icons")
-    {
+    } else if (arg == "--no-icons") {
       use_icons = false;
-    }
-    else if (arg[0] != '-')
-    {
+    } else if (arg[0] != '-') {
       start_path = arg;
-    }
-    else
-    {
+    } else {
       std::cerr << "Unknown option: " << arg << "\n";
       std::cerr << "Try '" << argv[0] << " --help' for more information.\n";
       return 1;
@@ -105,8 +92,7 @@ int main(int argc, char *argv[])
   keypad(stdscr, TRUE);
   curs_set(0); // Hide cursor
 
-  if (has_colors())
-  {
+  if (has_colors()) {
     start_color();
     use_default_colors();
   }
@@ -123,8 +109,7 @@ int main(int argc, char *argv[])
 
   // Load theme from file
   auto theme_path = fx::ThemeLoader::findThemeFile(theme_name);
-  if (theme_path)
-  {
+  if (theme_path) {
     std::cerr << "Loading theme from: " << *theme_path << "\n";
     auto def = fx::ThemeLoader::loadFromTOML(*theme_path);
     std::cerr << "Background: " << def.background << std::endl;
@@ -134,13 +119,10 @@ int main(int argc, char *argv[])
 
     // Set background if theme specifies one
     if (def.background != "transparent" && def.background != "default" &&
-        !def.background.empty())
-    {
+        !def.background.empty()) {
       bkgd(COLOR_PAIR(theme.background));
     }
-  }
-  else
-  {
+  } else {
     std::cerr << "Theme '" << theme_name << "' not found, using default\n";
     theme = theme_manager.applyThemeDefinition(
         flux::ThemeManager::getDefaultThemeDef());
@@ -150,25 +132,20 @@ int main(int argc, char *argv[])
   renderer.setTheme(theme);
 
   // Set icon style
-  if (use_icons)
-  {
+  if (use_icons) {
     renderer.setIconStyle(IconStyle::AUTO);
-  }
-  else
-  {
+  } else {
     renderer.setIconStyle(IconStyle::ASCII);
   }
 
   int ch;
   bool running = true;
-  while (running)
-  {
+  while (running) {
     browser.updateScroll(renderer.getViewportHeight());
     renderer.render(browser);
     ch = getch();
 
-    switch (ch)
-    {
+    switch (ch) {
     case KEY_UP:
     case 'k':
       browser.selectPrevious();
@@ -219,16 +196,12 @@ int main(int argc, char *argv[])
     case KEY_RIGHT:
     case KEY_ENTER:
     case 10:
-    case 13:
-    {
-      if (browser.isSelectedDirectory())
-      {
+    case 13: {
+      if (browser.isSelectedDirectory()) {
         browser.navigateInto(browser.getSelectedIndex());
-      }
-      else
-      {
-        // In standalone mode, just show selection
-        // You could add file opening here
+      } else {
+        const std::string selected_file = browser.getSelectedPath()->string();
+        openFileWithDefaultApp(selected_file);
         break;
       }
       break;
@@ -241,8 +214,7 @@ int main(int argc, char *argv[])
   return 0;
 }
 
-void setup_terminal_attributes()
-{
+void setup_terminal_attributes() {
 #ifndef _WIN32
   // Get current terminal settings and store them
   tcgetattr(STDIN_FILENO, &original_termios);
@@ -256,10 +228,95 @@ void setup_terminal_attributes()
 #endif
 }
 
-void restore_terminal_attributes()
-{
+void restore_terminal_attributes() {
 #ifndef _WIN32
   // Restore the original terminal settings
   tcsetattr(STDIN_FILENO, TCSANOW, &original_termios);
+#endif
+}
+
+void openFileWithDefaultApp(const std::string &filePath) {
+#ifdef _WIN32
+  // 1. Restore terminal state BEFORE launching the external app
+  endwin();                      // Close ncurses screen mode
+  restore_terminal_attributes(); // Restore custom terminal settings (though
+                                 // ncurses endwin() should cover most)
+
+  SHELLEXECUTEINFOA sei = {sizeof(sei)};
+  sei.lpFile = filePath.c_str();
+  sei.nShow = SW_SHOWNORMAL;
+  sei.lpVerb = "open";
+  sei.fMask =
+      SEE_MASK_NOCLOSEPROCESS |
+      SEE_MASK_FLAG_NO_UI; // Crucial: get process handle and suppress errors
+
+  if (ShellExecuteExA(&sei)) {
+    if (sei.hProcess) {
+      // 2. Wait for the external process to close
+      WaitForSingleObject(sei.hProcess, INFINITE);
+      CloseHandle(sei.hProcess);
+    }
+  } else {
+    std::cerr << "Error launching file on Windows." << std::endl;
+  }
+
+  // 3. Reinitialize ncurses and refresh the screen
+  refresh(); // Re-enters ncurses mode
+  // You may need to call the ncurses setup functions again, or at least
+  // doupdate() A simple 'refresh()' will re-enter ncurses mode and redraw the
+  // screen, but often a full redraw with 'doupdate()' or 'redrawwin(stdscr);
+  // doupdate();' is safer.
+  redrawwin(stdscr);
+  doupdate();
+
+#elif __APPLE__ || __linux__
+  // Unix/Linux/macOS (using std::system)
+  // std::system() already waits for the command to finish, so we only need the
+  // suspend/resume
+
+  // 1. Restore terminal state BEFORE launching the external app
+  endwin();
+  restore_terminal_attributes();
+
+  std::string command;
+#ifdef __APPLE__
+  command = "open \"" + filePath + "\"";
+#else
+  command = "xdg-open \"" + filePath + "\"";
+#endif
+
+  int result = std::system(command.c_str());
+
+  if (result != 0) {
+    std::cerr << "Error opening file. Command: " << command << std::endl;
+  }
+
+  // 2. Reinitialize ncurses and refresh the screen
+  // The main loop will call refresh() implicitly, but you must call initscr()
+  // again
+  initscr(); // Re-enters ncurses mode
+  cbreak();
+  noecho();
+  keypad(stdscr, TRUE);
+  curs_set(0); // Hide cursor
+
+  // Re-run color setup if necessary, and re-apply the background
+  if (has_colors()) {
+    start_color();
+    use_default_colors();
+  }
+
+  // The theme/color pairs should still be initialized, but you might need to
+  // re-apply the background: (This part depends on your flux::ThemeManager
+  // implementation, but for simplicity, we'll assume the main loop will take
+  // care of the full render shortly)
+
+  redrawwin(stdscr);
+  doupdate();
+
+#else
+  // Other/Unknown OS
+  std::cerr << "File opening not supported for this operating system."
+            << std::endl;
 #endif
 }

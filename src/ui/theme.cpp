@@ -210,26 +210,35 @@ short ThemeManager::findClosestBasicColor(int r, int g, int b) {
   return closest;
 }
 
-ThemeDefinition ThemeManager::getDefaultThemeDef() {
-  return ThemeDefinition{.background = "transparent",
-                         .foreground = "#C9D1D9",
-                         .state_active = "#58A6FF",
-                         .state_selected = "#264F78",
-                         .state_hover = "#161B22",
-                         .state_disabled = "#6E7681",
-                         .ui_primary = "#58A6FF",
-                         .ui_secondary = "#8B949E",
-                         .ui_accent = "#D2A8FF",
-                         .ui_success = "#7EE787",
-                         .ui_warning = "#E3B341",
-                         .ui_error = "#FF7B72",
-                         .ui_info = "#79C0FF",
-                         .ui_border = "#30363D",
-                         .status_bar_bg = "#21262D",
-                         .status_bar_fg = "#C9D1D9",
-                         .status_bar_active = "#58A6FF"};
+ThemeDefinition ThemeManager::getDefaultThemeDef()
+{
+  return ThemeDefinition{
+      .name = "default",
+      .background = "transparent",
+      .foreground = "#C9D1D9",
+      .selected = "#264F78",
+      .directory = "#79C0FF",
+      .executable = "#7EE787",
+      .hidden = "#6E7681",
+      .symlink = "#D2A8FF",
+      .parent_dir = "#58A6FF",
+      .state_active = "#58A6FF",
+      .state_selected = "#264F78",
+      .state_hover = "#161B22",
+      .state_disabled = "#6E7681",
+      .ui_primary = "#58A6FF",
+      .ui_secondary = "#8B949E",
+      .ui_accent = "#D2A8FF",
+      .ui_success = "#7EE787",
+      .ui_warning = "#E3B341",
+      .ui_error = "#FF7B72",
+      .ui_info = "#79C0FF",
+      .ui_border = "#30363D",
+      .status_bar_bg = "#21262D",
+      .status_bar_fg = "#C9D1D9",
+      .status_bar_active = "#58A6FF",
+  };
 }
-
 } // namespace flux
   //   return -1; // Use terminal default
   // }
