@@ -3,14 +3,12 @@
 
 #include <string>
 
-namespace flux
-{
+namespace flux {
 
 // Theme structure - contains COLOR_PAIR indices
 // In embedded mode: these are indices into the host app's color table
 // In standalone mode: these are Flux's own color pair indices (100+)
-struct Theme
-{
+struct Theme {
   int background;
   int foreground;
   int selected;
@@ -32,8 +30,7 @@ struct Theme
 
 // Theme definition - string-based color specifications
 // Used for loading themes from config files (TOML, YAML, etc.)
-struct ThemeDefinition
-{
+struct ThemeDefinition {
   std::string name;
 
   // Core colors
@@ -71,8 +68,7 @@ struct ThemeDefinition
 };
 
 // Theme manager - handles color pair initialization
-class ThemeManager
-{
+class ThemeManager {
 public:
   ThemeManager();
 
@@ -90,6 +86,7 @@ private:
 
   // Parse a color string to an ncurses color constant
   short parseColor(const std::string &color_str);
+  short findClosestBasicColor(int r, int g, int b);
 };
 
 // Create a basic default theme (fallback)

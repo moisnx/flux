@@ -7,14 +7,12 @@
 #include <ncursesw/ncurses.h>
 #endif
 
-namespace flux
-{
+namespace flux {
 
 // Create a default theme that uses standard ncurses color pairs
 // This is ONLY used when Flux runs standalone
 // When embedded in Arc, the bridge overrides these values
-Theme createDefaultTheme()
-{
+Theme createDefaultTheme() {
   Theme theme;
 
   // These are just fallback indices for standalone mode
@@ -45,14 +43,12 @@ ThemeManager::ThemeManager() : embedded_mode_(false) {}
 
 void ThemeManager::setEmbeddedMode(bool embedded) { embedded_mode_ = embedded; }
 
-Theme ThemeManager::applyThemeDefinition(const ThemeDefinition &def)
-{
+Theme ThemeManager::applyThemeDefinition(const ThemeDefinition &def) {
   Theme theme;
 
   // CRITICAL: In embedded mode, we DON'T call init_pair()
   // We just return indices that are already configured by the host app
-  if (embedded_mode_)
-  {
+  if (embedded_mode_) {
     // When embedded, the host provides the color pairs
     // This function should not be called - use the bridge instead
     return createDefaultTheme();
@@ -61,8 +57,7 @@ Theme ThemeManager::applyThemeDefinition(const ThemeDefinition &def)
   // Standalone mode: Initialize color pairs from scratch
   // This is only for when Flux runs independently
 
-  if (!has_colors())
-  {
+  if (!has_colors()) {
     return createDefaultTheme();
   }
 
@@ -129,16 +124,41 @@ Theme ThemeManager::applyThemeDefinition(const ThemeDefinition &def)
   return theme;
 }
 
-short ThemeManager::parseColor(const std::string &color_str)
-{
-  if (color_str[0] == '#' && color_str.length() == 7)
-  {
-    // Parse hex color (simplified for standalone mode)
-    // In reality, you'd map to closest 8-color or use 256-color palette
-    return COLOR_WHITE; // Fallback
+short ThemeManager::parseColor(const std::string &color_str) {
+  // Handle special values
+  if (color_str == "transparent" || color_str == "default" ||
+      color_str.empty()) {
+    return -1; // Use terminal default
   }
 
-  // Named color fallbacks
+  // Parse hex colors
+  if (color_str[0] == '#' && color_str.length() == 7) {
+    // Extract RGB values
+    int r = std::stoi(color_str.substr(1, 2), nullptr, 16);
+    int g = std::stoi(color_str.substr(3, 2), nullptr, 16);
+    int b = std::stoi(color_str.substr(5, 2), nullptr, 16);
+
+    // Convert RGB (0-255) to ncurses 1000-based scale
+    short r_1000 = (r * 1000) / 255;
+    short g_1000 = (g * 1000) / 255;
+    short b_1000 = (b * 1000) / 255;
+
+    // Check if terminal supports custom colors
+    static short next_color_id = 16; // Start after basic 16 colors
+
+    if (COLORS >= 256 && can_change_color() && next_color_id < COLORS) {
+      short color_id = next_color_id++;
+
+      if (init_color(color_id, r_1000, g_1000, b_1000) == OK) {
+        return color_id;
+      }
+    }
+
+    // Fallback: Find closest basic 8-color
+    return findClosestBasicColor(r, g, b);
+  }
+
+  // Named colors
   if (color_str == "black")
     return COLOR_BLACK;
   if (color_str == "red")
@@ -156,11 +176,41 @@ short ThemeManager::parseColor(const std::string &color_str)
   if (color_str == "white")
     return COLOR_WHITE;
 
-  return COLOR_WHITE; // Default fallback
+  return COLOR_WHITE; // Final fallback
 }
 
-ThemeDefinition ThemeManager::getDefaultThemeDef()
-{
+short ThemeManager::findClosestBasicColor(int r, int g, int b) {
+  // Map RGB to closest basic 8 colors
+  struct ColorMap {
+    short ncurses_color;
+    int r, g, b;
+  };
+
+  static const ColorMap colors[] = {
+      {COLOR_BLACK, 0, 0, 0},    {COLOR_RED, 255, 0, 0},
+      {COLOR_GREEN, 0, 255, 0},  {COLOR_YELLOW, 255, 255, 0},
+      {COLOR_BLUE, 0, 0, 255},   {COLOR_MAGENTA, 255, 0, 255},
+      {COLOR_CYAN, 0, 255, 255}, {COLOR_WHITE, 255, 255, 255}};
+
+  double min_distance = 1000000;
+  short closest = COLOR_WHITE;
+
+  for (const auto &color : colors) {
+    double dr = r - color.r;
+    double dg = g - color.g;
+    double db = b - color.b;
+    double distance = dr * dr + dg * dg + db * db;
+
+    if (distance < min_distance) {
+      min_distance = distance;
+      closest = color.ncurses_color;
+    }
+  }
+
+  return closest;
+}
+
+ThemeDefinition ThemeManager::getDefaultThemeDef() {
   return ThemeDefinition{.background = "transparent",
                          .foreground = "#C9D1D9",
                          .state_active = "#58A6FF",
