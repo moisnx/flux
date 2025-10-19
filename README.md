@@ -8,30 +8,30 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)
 
-## ✨ Features
+## Features
 
 ### Current Features (v0.1.0)
 
-- ⚡ **Lightning fast** - Instant startup and snappy navigation
-- 🎨 **Beautiful themes** - Multiple color schemes with full customization
-- 🔤 **Nerd Font icons** - File type icons using Nerd Fonts
-- ⌨️ **Vim-like navigation** - hjkl keybindings for efficient browsing
-- 📁 **Smart sorting** - Sort by name, size, date, or type
-- 👻 **Hidden files** - Toggle visibility with a single key
-- 🎯 **Embeddable** - Use as a library in your own applications
+- **Lightning fast** - Instant startup and snappy navigation
+- **Beautiful themes** - Multiple color schemes with full customization
+- **Nerd Font icons** - File type icons using Nerd Fonts
+- **Vim-like navigation** - hjkl keybindings for efficient browsing
+- **Smart sorting** - Sort by name, size, date, or type
+- **Hidden files** - Toggle visibility with a single key
+- **Embeddable** - Use as a library in your own applications
 
 ### Coming Soon
 
-- 📋 File operations (copy, paste, delete, rename, mkdir)
-- ✅ Multi-file selection
-- 🔍 Fuzzy search and filtering
-- 👁️ File preview pane
-- 🌳 Git integration
-- 📦 Archive browsing
-- 🔖 Bookmarks
-- ⚙️ Configuration file support
+- File operations (copy, paste, delete, rename, mkdir)
+- Multi-file selection
+- Fuzzy search and filtering
+- File preview pane
+- Git integration
+- Archive browsing
+- Bookmarks
+- Configuration file support
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Installation
 
@@ -156,7 +156,7 @@ fx --theme mytheme
 
 **Note:** Use `"transparent"` for background to use your terminal's background color.
 
-## 📚 Using as a Library
+## Using as a Library
 
 Flux is designed to be easily embedded in other TUI applications:
 
@@ -251,7 +251,7 @@ Flux is built on these core principles:
 
 ## 🗺️ Roadmap
 
-### Phase 1: MVP ✅
+### Phase 1: MVP
 
 - [x] Directory browsing
 - [x] Vim-like navigation
@@ -281,7 +281,7 @@ Flux is built on these core principles:
 - [ ] Trash support
 - [ ] Plugin system
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Please feel free to submit issues and pull requests.
 
@@ -295,21 +295,19 @@ cmake .. -DCMAKE_BUILD_TYPE=Debug
 make
 ```
 
-## 📄 License
+## License
 
 MIT License - see LICENSE file for details
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - Inspired by [ranger](https://github.com/ranger/ranger), [lf](https://github.com/gokcehan/lf), and [nnn](https://github.com/jarun/nnn)
 - Icons provided by [Nerd Fonts](https://www.nerdfonts.com/)
 - Built with [tomlplusplus](https://github.com/marzer/tomlplusplus)
 
-## 📞 Contact
+## Contact
 
 - GitHub: [@moisnx](https://github.com/moisnx)
 - Issues: [GitHub Issues](https://github.com/moisnx/flux/issues)
 
 ---
-
-**Made with ❤️ and C++**
