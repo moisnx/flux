@@ -1,0 +1,30 @@
+# flux theme configuration file
+
+name = "Deep Night"
+author = "Flux Generator"
+
+[colors]
+# Core Backgrounds & Text
+background = "#181920" # Very dark gray/blue base
+foreground = "#E5E9F0" # Bright off-white text
+
+# File/directory listing colors
+selected = "#3B4252"   # Dark blue-gray for selected item background
+directory = "#88C0D0"  # Light blue/cyan for directories
+executable = "#A3BE8C" # Soft green for executable files
+hidden = "#4C566A"     # Muted blue-gray for hidden files
+symlink = "#B48EAD"    # Muted purple for symbolic links
+parent_dir = "#D8DEE9" # Near-white for '..'
+
+# UI components
+status_bar = "#2E3440"        # Status bar background (slightly darker than secondary)
+status_bar_active = "#4C566A" # Active status bar section
+ui_secondary = "#373E4A"      # Secondary UI elements (scrollbars, inactive tabs)
+ui_border = "#5E81AC"         # Blue border color
+ui_accent = "#81A1C1"         # Primary blue accent
+
+# Notifications/Alerts
+ui_error = "#BF616A"   # Muted red for errors
+ui_warning = "#EBCB8B" # Orange/yellow for warnings
+ui_info = "#5E81AC"    # Blue for informational messages
+ui_success = "#A3BE8C" # Soft green for success

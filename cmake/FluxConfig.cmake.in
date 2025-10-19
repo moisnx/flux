@@ -1,0 +1,9 @@
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/FluxTargets.cmake")
+
+check_required_components(Flux)
+
+# Provide variables for convenience
+set(FLUX_LIBRARIES Flux::flux)
+set(FLUX_INCLUDE_DIRS "@PACKAGE_INCLUDE_INSTALL_DIR@")

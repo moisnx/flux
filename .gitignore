@@ -1,0 +1,78 @@
+# Build directories
+build/
+Build/
+BUILD/
+out/
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+*.cmake
+!CMakeLists.txt
+
+# Compiled binaries and libraries
+*.exe
+*.out
+*.app
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+*.o
+*.obj
+
+# Debug files
+*.pdb
+*.ilk
+*.map
+*.exp
+
+# IDE and editor files
+.vscode/
+.vs/
+*.vcxproj*
+*.sln
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Language server cache
+.cache/
+.clangd/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*~
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.swp
+*.swo
+*~
+
+# Package manager files (if using)
+vcpkg_installed/
+conan.lock
+conanbuildinfo.*
+
+# Testing
+Testing/
+tests/build/
+
+# Documentation build
+docs/build/
+doc/build/
+
+# Dev files
+todo.md
