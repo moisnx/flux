@@ -17,6 +17,46 @@ IconProvider::IconProvider(IconStyle style) : current_style_(style) {
 }
 
 bool IconProvider::detectUnicodeSupport() const {
+#ifdef _WIN32
+  // On Windows, check for modern terminals and UTF-8 codepage
+
+  // Check if we're in Windows Terminal (best Unicode support)
+  const char *wt_session = std::getenv("WT_SESSION");
+  if (wt_session) {
+    return true;
+  }
+
+  // Check for other modern Windows terminals
+  const char *term_program = std::getenv("TERM_PROGRAM");
+  if (term_program) {
+    std::string tp(term_program);
+    if (tp.find("vscode") != std::string::npos ||
+        tp.find("mintty") != std::string::npos) { // Git Bash uses mintty
+      return true;
+    }
+  }
+
+  // Check ConEmu
+  const char *conemuansi = std::getenv("ConEmuANSI");
+  if (conemuansi && std::string(conemuansi) == "ON") {
+    return true;
+  }
+
+  // Check console codepage (65001 = UTF-8)
+  const char *codepage = std::getenv("PYTHONIOENCODING");
+  if (codepage && strstr(codepage, "utf8")) {
+    return true;
+  }
+
+  // Try to detect UTF-8 from chcp command output (codepage 65001)
+  // Note: This requires Windows-specific API calls for proper detection
+  // For now, we'll be conservative and default to false unless explicitly
+  // detected
+
+  return false; // Conservative default for Windows
+#else
+  // Unix/Linux/macOS detection (original code)
+
   // Check LANG environment variable for UTF-8
   const char *lang = std::getenv("LANG");
   if (lang &&
@@ -45,8 +85,8 @@ bool IconProvider::detectUnicodeSupport() const {
   }
 
   return false;
+#endif
 }
-
 void IconProvider::initializeNerdFontMap() {
   // NOTE: These are Nerd Font codepoints. Make sure this file is saved as
   // UTF-8! If icons don't show, your editor might have converted them to

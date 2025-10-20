@@ -24,6 +24,8 @@ if(WIN32)
 
     if(MSVC)
         set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+          add_compile_options(/utf-8)
+        add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
     endif()
 endif()
 
@@ -225,6 +227,7 @@ if(BUILD_STANDALONE)
         
         # If using MSVC, ensure static runtime
         if(MSVC)
+      
             target_compile_options(fx PRIVATE
                 $<$<CONFIG:Debug>:/MTd>
                 $<$<CONFIG:Release>:/MT>
