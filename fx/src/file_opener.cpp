@@ -32,14 +32,12 @@ std::vector<std::string> FileOpener::allowed_commands_ = {
     "kwrite",
     "notepad",
     "notepad++",
-
     // File viewers
     "less",
     "more",
     "cat",
     "bat",
     "most",
-
     // Image viewers
     "feh",
     "sxiv",
@@ -50,35 +48,33 @@ std::vector<std::string> FileOpener::allowed_commands_ = {
     "gimp",
     "krita",
     "inkscape",
-
     // Video/Audio players
     "mpv",
     "vlc",
     "mplayer",
     "ffplay",
     "totem",
-
     // PDF viewers
     "zathura",
     "evince",
     "okular",
     "mupdf",
     "xpdf",
-
     // Browsers
     "firefox",
     "chrome",
     "chromium",
     "brave",
     "safari",
-
     // Archive managers
     "file-roller",
     "ark",
     "xarchiver",
 };
 
-bool FileOpener::use_whitelist_ = false; // Disabled by default for flexibility
+bool FileOpener::use_whitelist_ = false;
+FileOpener::TerminalCallback FileOpener::suspend_callback_ = nullptr;
+FileOpener::TerminalCallback FileOpener::resume_callback_ = nullptr;
 
 std::vector<std::string> FileOpener::parseCommand(const std::string &command) {
   std::vector<std::string> parts;
@@ -116,20 +112,16 @@ std::optional<std::filesystem::path>
 FileOpener::validatePath(const std::string &path,
                          const std::optional<std::filesystem::path> &base_dir) {
   try {
-    // Check if path exists
     if (!std::filesystem::exists(path)) {
       return std::nullopt;
     }
 
-    // Get canonical (absolute, symlinks resolved) path
     auto canonical = std::filesystem::canonical(path);
 
-    // If base directory specified, ensure file is within it
     if (base_dir) {
       auto base_canonical = std::filesystem::canonical(*base_dir);
       auto relative = std::filesystem::relative(canonical, base_canonical);
 
-      // Check if path tries to escape base directory
       std::string rel_str = relative.string();
       if (rel_str.size() >= 2 && rel_str.substr(0, 2) == "..") {
         return std::nullopt;
@@ -138,17 +130,16 @@ FileOpener::validatePath(const std::string &path,
 
     return canonical;
 
-  } catch (const std::filesystem::filesystem_error &e) {
+  } catch (const std::filesystem::filesystem_error &) {
     return std::nullopt;
   }
 }
 
 bool FileOpener::isCommandAllowed(const std::string &command) {
   if (!use_whitelist_) {
-    return true; // Whitelist disabled
+    return true;
   }
 
-  // Extract executable name from command
   auto parts = parseCommand(command);
   if (parts.empty()) {
     return false;
@@ -156,20 +147,17 @@ bool FileOpener::isCommandAllowed(const std::string &command) {
 
   std::string exe = parts[0];
 
-  // Remove path, keep just basename
   size_t slash_pos = exe.find_last_of("/\\");
   if (slash_pos != std::string::npos) {
     exe = exe.substr(slash_pos + 1);
   }
 
-  // Remove .exe extension on Windows
 #ifdef _WIN32
   if (exe.size() > 4 && exe.substr(exe.size() - 4) == ".exe") {
     exe = exe.substr(0, exe.size() - 4);
   }
 #endif
 
-  // Check if in whitelist
   return std::find(allowed_commands_.begin(), allowed_commands_.end(), exe) !=
          allowed_commands_.end();
 }
@@ -187,37 +175,30 @@ void FileOpener::clearAllowedCommands() { allowed_commands_.clear(); }
 bool FileOpener::executeUnix(const std::vector<std::string> &parts,
                              const std::filesystem::path &file_path,
                              bool wait) {
+  // Suspend terminal before launching
+  if (suspend_callback_)
+    suspend_callback_();
+
   pid_t pid = fork();
 
   if (pid < 0) {
-    return false; // Fork failed
+    if (resume_callback_)
+      resume_callback_();
+    return false;
   }
 
   if (pid == 0) {
-    // Child process
-
-    // Build argument array for execvp
+    // Child process executes command
     std::vector<const char *> args;
-
-    // Add program name
     args.push_back(parts[0].c_str());
-
-    // Add original arguments from command (skip program name)
-    for (size_t i = 1; i < parts.size(); ++i) {
+    for (size_t i = 1; i < parts.size(); ++i)
       args.push_back(parts[i].c_str());
-    }
 
-    // Add file path as last argument
     std::string path_str = file_path.string();
     args.push_back(path_str.c_str());
-    args.push_back(nullptr); // execvp requires null terminator
+    args.push_back(nullptr);
 
-    // Execute - this replaces the child process
-    // NO SHELL is invoked, so no command injection possible!
     execvp(args[0], const_cast<char *const *>(args.data()));
-
-    // If execvp returns, it failed
-    std::cerr << "Failed to execute: " << args[0] << std::endl;
     _exit(127);
   }
 
@@ -225,10 +206,13 @@ bool FileOpener::executeUnix(const std::vector<std::string> &parts,
   if (wait) {
     int status;
     waitpid(pid, &status, 0);
+    if (resume_callback_)
+      resume_callback_();
     return WIFEXITED(status) && WEXITSTATUS(status) == 0;
   }
 
-  // For GUI apps, don't wait
+  if (resume_callback_)
+    resume_callback_();
   return true;
 }
 #endif
@@ -237,23 +221,25 @@ bool FileOpener::executeUnix(const std::vector<std::string> &parts,
 bool FileOpener::executeWindows(const std::string &command,
                                 const std::filesystem::path &file_path,
                                 bool wait) {
-  // Parse command to get executable and arguments
+  if (suspend_callback_)
+    suspend_callback_();
+
   auto parts = parseCommand(command);
   if (parts.empty()) {
+    if (resume_callback_)
+      resume_callback_();
     return false;
   }
 
   std::string exe = parts[0];
   std::string args;
 
-  // Build argument string
   for (size_t i = 1; i < parts.size(); ++i) {
     if (!args.empty())
       args += " ";
     args += "\"" + parts[i] + "\"";
   }
 
-  // Add file path
   if (!args.empty())
     args += " ";
   args += "\"" + file_path.string() + "\"";
@@ -265,6 +251,8 @@ bool FileOpener::executeWindows(const std::string &command,
   sei.fMask = wait ? SEE_MASK_NOCLOSEPROCESS : 0;
 
   if (!ShellExecuteExA(&sei)) {
+    if (resume_callback_)
+      resume_callback_();
     return false;
   }
 
@@ -273,31 +261,29 @@ bool FileOpener::executeWindows(const std::string &command,
     CloseHandle(sei.hProcess);
   }
 
+  if (resume_callback_)
+    resume_callback_();
   return true;
 }
 #endif
 
 FileOpener::OpenResult FileOpener::openWith(const std::string &file_path,
                                             const OpenConfig &config) {
-  // Validate file path
   auto canonical_path = validatePath(file_path, config.allowed_base_dir);
   if (!canonical_path) {
     return OpenResult{false, "Invalid or inaccessible file path"};
   }
 
-  // Check command whitelist if enabled
   if (config.validate_command && !isCommandAllowed(config.command)) {
     return OpenResult{false,
                       "Command not in allowed whitelist: " + config.command};
   }
 
-  // Parse command
   auto parts = parseCommand(config.command);
   if (parts.empty()) {
     return OpenResult{false, "Empty command"};
   }
 
-  // Execute based on platform
   bool success = false;
 
 #ifdef _WIN32
@@ -316,7 +302,6 @@ FileOpener::OpenResult FileOpener::openWith(const std::string &file_path,
 
 FileOpener::OpenResult
 FileOpener::openWithDefault(const std::string &file_path) {
-  // Validate file path
   auto canonical_path = validatePath(file_path);
   if (!canonical_path) {
     return OpenResult{false, "Invalid or inaccessible file path"};
@@ -324,24 +309,32 @@ FileOpener::openWithDefault(const std::string &file_path) {
 
   std::string path_str = canonical_path->string();
 
+  if (suspend_callback_)
+    suspend_callback_();
+
 #ifdef _WIN32
-  // Windows: use ShellExecute with "open" verb
   SHELLEXECUTEINFOA sei = {sizeof(sei)};
   sei.lpFile = path_str.c_str();
   sei.nShow = SW_SHOWNORMAL;
   sei.lpVerb = "open";
   sei.fMask = SEE_MASK_FLAG_NO_UI;
 
-  if (!ShellExecuteExA(&sei)) {
+  bool success = ShellExecuteExA(&sei);
+
+  if (resume_callback_)
+    resume_callback_();
+
+  if (!success) {
     return OpenResult{false, "Failed to open with default handler"};
   }
 
   return OpenResult{true, ""};
 
 #elif defined(__APPLE__)
-  // macOS: use 'open' command
   pid_t pid = fork();
   if (pid < 0) {
+    if (resume_callback_)
+      resume_callback_();
     return OpenResult{false, "Failed to fork process"};
   }
 
@@ -351,12 +344,15 @@ FileOpener::openWithDefault(const std::string &file_path) {
     _exit(127);
   }
 
+  if (resume_callback_)
+    resume_callback_();
   return OpenResult{true, ""};
 
 #else
-  // Linux: use xdg-open
   pid_t pid = fork();
   if (pid < 0) {
+    if (resume_callback_)
+      resume_callback_();
     return OpenResult{false, "Failed to fork process"};
   }
 
@@ -366,6 +362,8 @@ FileOpener::openWithDefault(const std::string &file_path) {
     _exit(127);
   }
 
+  if (resume_callback_)
+    resume_callback_();
   return OpenResult{true, ""};
 #endif
 }

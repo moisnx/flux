@@ -28,13 +28,7 @@
 void setup_terminal_attributes();
 void restore_terminal_attributes();
 void setup_signal_handlers();
-void fully_cleanup_terminal();
-void fully_reinit_terminal(flux::ThemeManager &theme_manager,
-                           const std::string &theme_name,
-                           const fx::Config &config);
-void openFileWithHandler(const std::string &filePath, const fx::Config &config,
-                         flux::ThemeManager &theme_manager,
-                         const std::string &theme_name);
+void openFileWithHandler(const std::string &filePath, const fx::Config &config);
 std::optional<fx::FileHandler> findMatchingHandler(const std::string &filePath,
                                                    const fx::Config &config);
 
@@ -44,6 +38,11 @@ static struct sigaction original_sigwinch;
 static struct sigaction original_sigtstp;
 static struct sigaction original_sigcont;
 #endif
+
+// Global variables for terminal state
+static flux::ThemeManager *g_theme_manager = nullptr;
+static std::string g_theme_name;
+static flux::Theme g_theme;
 
 void printUsage(const char *program_name) {
   std::cout << "fx - A modern terminal file browser\n\n";
@@ -70,6 +69,61 @@ void printUsage(const char *program_name) {
   std::cout << "  .                Toggle hidden\n";
   std::cout << "  s                Cycle sort mode\n";
   std::cout << "  q                Quit\n";
+}
+
+void suspendTerminal() {
+  // Save terminal mode
+  def_prog_mode();
+
+  // Clean up ncurses
+  if (!isendwin()) {
+    endwin();
+  }
+
+  // Reset terminal to normal mode
+  std::cout << "\033[0m" << std::flush; // Reset attributes
+}
+
+void resumeTerminal() {
+  // Small delay to let external program fully exit
+  usleep(50000); // 50ms - much shorter than before!
+
+  // Reset terminal completely
+  std::cout << "\033c" << std::flush;
+
+  // Reinitialize ncurses
+  refresh(); // This calls doupdate() which reinitializes
+
+  // Restore terminal mode
+  reset_prog_mode();
+
+  // Reconfigure ncurses
+  cbreak();
+  noecho();
+  keypad(stdscr, TRUE);
+  curs_set(0);
+  set_escdelay(25);
+
+  // Reapply colors and theme
+  if (has_colors() && g_theme_manager) {
+    start_color();
+    use_default_colors();
+
+    auto theme_path = fx::ThemeLoader::findThemeFile(g_theme_name);
+    if (theme_path) {
+      auto def = fx::ThemeLoader::loadFromTOML(*theme_path);
+      g_theme = g_theme_manager->applyThemeDefinition(def);
+
+      if (def.background != "transparent" && def.background != "default" &&
+          !def.background.empty()) {
+        bkgd(COLOR_PAIR(g_theme.background));
+      }
+    }
+  }
+
+  // Force complete redraw
+  clearok(stdscr, TRUE);
+  refresh();
 }
 
 int main(int argc, char *argv[]) {
@@ -127,8 +181,10 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  if (strict_mode)
+  if (strict_mode) {
     std::cerr << "[fx] Strict mode: command whitelist enabled\n";
+    fx::FileOpener::enableWhitelist(true);
+  }
 
   std::setlocale(LC_ALL, "");
 
@@ -156,12 +212,21 @@ int main(int argc, char *argv[]) {
   flux::ThemeManager theme_manager;
   flux::Theme theme;
 
+  // Set up global variables for callbacks
+  g_theme_manager = &theme_manager;
+  g_theme_name = theme_name;
+
+  // Set up FileOpener callbacks ONCE at startup
+  fx::FileOpener::setTerminalSuspendCallback(suspendTerminal);
+  fx::FileOpener::setTerminalResumeCallback(resumeTerminal);
+
   auto theme_path = fx::ThemeLoader::findThemeFile(theme_name);
   if (theme_path) {
     std::cerr << "[fx] Loading theme: " << theme_name << " from " << *theme_path
               << "\n";
     auto def = fx::ThemeLoader::loadFromTOML(*theme_path);
     theme = theme_manager.applyThemeDefinition(def);
+    g_theme = theme;
 
     if (def.background != "transparent" && def.background != "default" &&
         !def.background.empty())
@@ -170,6 +235,7 @@ int main(int argc, char *argv[]) {
     std::cerr << "[fx] Theme '" << theme_name << "' not found, using default\n";
     theme = theme_manager.applyThemeDefinition(
         flux::ThemeManager::getDefaultThemeDef());
+    g_theme = theme;
     bkgd(COLOR_PAIR(theme.background));
   }
 
@@ -240,11 +306,10 @@ int main(int argc, char *argv[]) {
         browser.navigateInto(browser.getSelectedIndex());
       } else {
         const std::string selected_file = browser.getSelectedPath()->string();
-        openFileWithHandler(selected_file, config, theme_manager, theme_name);
+        openFileWithHandler(selected_file, config);
+        // Refresh browser and renderer after returning
         browser.refresh();
-        renderer.setTheme(theme);
-        clearok(stdscr, TRUE);
-        refresh();
+        renderer.setTheme(g_theme);
       }
       break;
     }
@@ -279,59 +344,9 @@ std::optional<fx::FileHandler> findMatchingHandler(const std::string &filePath,
   return std::nullopt;
 }
 
-void fully_cleanup_terminal() {
-#ifndef _WIN32
-  sigaction(SIGWINCH, &original_sigwinch, nullptr);
-  sigaction(SIGTSTP, &original_sigtstp, nullptr);
-  sigaction(SIGCONT, &original_sigcont, nullptr);
-#endif
-
-  if (!isendwin())
-    endwin();
-  restore_terminal_attributes();
-
-  std::cout << "\033[0m\033[?1049l\033[?25h";
-  std::cout.flush();
-
-  if (has_colors()) {
-    for (int i = 0; i < std::min(COLOR_PAIRS, 256); ++i)
-      init_pair(i, -1, -1);
-  }
-}
-
-void fully_reinit_terminal(flux::ThemeManager &theme_manager,
-                           const std::string &theme_name,
-                           const fx::Config &config) {
-  usleep(100000);
-  std::cout << "\033c" << std::flush;
-
-  initscr();
-  cbreak();
-  noecho();
-  keypad(stdscr, TRUE);
-  curs_set(0);
-  set_escdelay(25);
-
-  if (has_colors()) {
-    start_color();
-    use_default_colors();
-
-    auto theme_path = fx::ThemeLoader::findThemeFile(theme_name);
-    if (theme_path) {
-      auto def = fx::ThemeLoader::loadFromTOML(*theme_path);
-      theme_manager.applyThemeDefinition(def);
-    }
-  }
-
-  clearok(stdscr, TRUE);
-  refresh();
-}
-
-void openFileWithHandler(const std::string &filePath, const fx::Config &config,
-                         flux::ThemeManager &theme_manager,
-                         const std::string &theme_name) {
+void openFileWithHandler(const std::string &filePath,
+                         const fx::Config &config) {
   auto handler = findMatchingHandler(filePath, config);
-  fully_cleanup_terminal();
 
   fx::FileOpener::OpenResult result;
 
@@ -339,24 +354,22 @@ void openFileWithHandler(const std::string &filePath, const fx::Config &config,
     fx::FileOpener::OpenConfig open_config;
     open_config.command = handler->command;
     open_config.wait_for_completion = handler->terminal;
-    open_config.validate_command = false;
+    open_config.validate_command = fx::FileOpener::isWhitelistEnabled();
 
     std::cerr << "[fx] Opening with handler: " << handler->command << "\n";
     result = fx::FileOpener::openWith(filePath, open_config);
-    usleep(handler->terminal ? 200000 : 100000);
   } else {
     std::cerr << "[fx] Opening with default handler\n";
     result = fx::FileOpener::openWithDefault(filePath);
-    usleep(100000);
   }
 
   if (!result.success) {
-    std::cerr << "Error: " << result.error_message
-              << "\nPress Enter to continue...";
+    // Show error without messing up terminal state
+    std::cerr << "\n[fx] Error: " << result.error_message << "\n";
+    std::cerr << "Press Enter to continue...";
+    std::cin.ignore();
     std::cin.get();
   }
-
-  fully_reinit_terminal(theme_manager, theme_name, config);
 }
 
 void setup_terminal_attributes() {
