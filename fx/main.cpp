@@ -3,15 +3,24 @@
 #include <flux.h>
 #include <iostream>
 #include <locale>
+
 #ifdef _WIN32
-#include <shellapi.h> // For ShellExecute
 #include <windows.h>
+#endif
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <shellapi.h>
 #endif
 
 #ifdef _WIN32
 #include <curses.h>
 #else
 #include <ncursesw/ncurses.h>
+#endif
+
+#ifndef CTRL
+#define CTRL(c) ((c) & 0x1f)
 #endif
 
 #ifndef _WIN32

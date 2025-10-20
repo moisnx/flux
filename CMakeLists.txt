@@ -34,7 +34,7 @@ endif()
 set(DEPS_DIR ${PROJECT_SOURCE_DIR}/deps)
 
 if(WIN32)
-    # Windows: Use PDCursesMod with UTF-8 support
+    # Windows: Use PDCursesMod (already has UTF-8 support via VT mode)
     set(PDCURSESMOD_DIR ${DEPS_DIR}/PDCursesMod/wincon)
 
     if(EXISTS "${PDCURSESMOD_DIR}/pdcurses.lib")
@@ -106,6 +106,8 @@ else()
         set(CURSES_INCLUDE_DIRS ${CURSES_INCLUDE_DIR})
     endif()
 endif()
+
+
 
 # ============================================
 # Flux Library (Core + UI)
@@ -196,18 +198,39 @@ if(BUILD_STANDALONE)
     set(STANDALONE_SOURCES
         fx/main.cpp
         fx/src/theme_loader.cpp
-        # fx/app.cpp
-        # fx/file_actions.cpp
     )
-
+    
     add_executable(fx ${STANDALONE_SOURCES})
 
-    target_link_libraries(fx PRIVATE flux)
+    # Link to the main library 'flux' and curses
+    target_link_libraries(fx PRIVATE flux ${CURSES_LIBRARIES})
 
     target_include_directories(fx PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/fx
+        ${CURSES_INCLUDE_DIRS}
     )
+
+    # Windows-specific settings for PDCursesMod
+    if(WIN32)
+        # CRITICAL: These must match how PDCursesMod was built
+        target_compile_definitions(fx PRIVATE 
+            PDC_STATIC          # Static linking
+            PDC_WIDE            # Wide character support
+            PDC_FORCE_UTF8      # UTF-8 support
+        )
+        
+        # Link additional Windows libraries
+        target_link_libraries(fx PRIVATE winmm)
+        
+        # If using MSVC, ensure static runtime
+        if(MSVC)
+            target_compile_options(fx PRIVATE
+                $<$<CONFIG:Debug>:/MTd>
+                $<$<CONFIG:Release>:/MT>
+            )
+        endif()
+    endif()
 
     # Install binary only if installation is enabled
     if(FLUX_INSTALL)
@@ -322,9 +345,9 @@ else()
 endif()
 message(STATUS "")
 message(STATUS "Build options:")
-message(STATUS "  Standalone binary (fx): ${BUILD_STANDALONE}")
-message(STATUS "  Examples: ${BUILD_EXAMPLES}")
-message(STATUS "  Shared library: ${BUILD_SHARED_LIBS}")
+message(STATUS " 	Standalone binary (fx): ${BUILD_STANDALONE}")
+message(STATUS " 	Examples: ${BUILD_EXAMPLES}")
+message(STATUS " 	Shared library: ${BUILD_SHARED_LIBS}")
 message(STATUS "")
 message(STATUS "Install prefix: ${CMAKE_INSTALL_PREFIX}")
 message(STATUS "========================================")
