@@ -1,4 +1,5 @@
-#include "include/theme_loader.h"
+#include "include/theme_loader.hpp"
+#include "include/config_loader.hpp"
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -77,28 +78,42 @@ std::string ThemeLoader::getColorOrDefault(const toml::table &colors,
 std::vector<std::filesystem::path> ThemeLoader::getThemeSearchPaths() {
   std::vector<std::filesystem::path> paths;
 
-  // 1. User config directory
+  // 1. Check config-aware theme directory first (./config/themes or
+  // ~/.config/fx/themes)
+  auto config_themes = ConfigLoader::get_themes_directory();
+  if (config_themes) {
+    paths.push_back(*config_themes);
+  }
+
+  // 2. User config directory
 #ifdef _WIN32
   if (const char *appdata = std::getenv("APPDATA")) {
-    paths.push_back(std::filesystem::path(appdata) / "flux" / "themes");
+    paths.push_back(std::filesystem::path(appdata) / "fx" / "themes");
   }
 #else
   if (const char *home = std::getenv("HOME")) {
-    paths.push_back(std::filesystem::path(home) / ".config" / "flux" /
-                    "themes");
+    paths.push_back(std::filesystem::path(home) / ".config" / "fx" / "themes");
   }
 
-  // 2. XDG config directory
+  // 3. XDG config directory
   if (const char *xdg_config = std::getenv("XDG_CONFIG_HOME")) {
-    paths.push_back(std::filesystem::path(xdg_config) / "flux" / "themes");
+    paths.push_back(std::filesystem::path(xdg_config) / "fx" / "themes");
   }
 
-  // 3. System-wide themes
-  paths.push_back("/usr/share/flux/themes");
-  paths.push_back("/usr/local/share/flux/themes");
+  // 4. System-wide themes (installed via make install)
+  paths.push_back("/usr/share/fx/themes");
+  paths.push_back("/usr/local/share/fx/themes");
 #endif
 
-  // 4. Current directory
+  // 5. Windows program files
+#ifdef _WIN32
+  if (const char *program_files = std::getenv("ProgramFiles")) {
+    paths.push_back(std::filesystem::path(program_files) / "fx" / "themes");
+  }
+#endif
+
+  // 6. Current directory (local development)
+  paths.push_back(std::filesystem::current_path() / "config" / "themes");
   paths.push_back(std::filesystem::current_path() / "themes");
 
   return paths;
@@ -109,19 +124,27 @@ ThemeLoader::findThemeFile(const std::string &theme_name) {
   auto paths = getThemeSearchPaths();
 
   for (const auto &base_path : paths) {
+    if (!std::filesystem::exists(base_path)) {
+      continue;
+    }
+
     // Try with .toml extension
     auto toml_path = base_path / (theme_name + ".toml");
     if (std::filesystem::exists(toml_path)) {
+      // std::cout << "[fx] Found theme: " << toml_path << "\n";
       return toml_path.string();
     }
 
     // Try without extension
     auto no_ext_path = base_path / theme_name;
     if (std::filesystem::exists(no_ext_path)) {
+      // std::cout << "[fx] Found theme: " << no_ext_path << "\n";
       return no_ext_path.string();
     }
   }
 
+  std::cerr << "[fx] Theme '" << theme_name << "' not found in search paths\n";
   return std::nullopt;
 }
+
 } // namespace fx

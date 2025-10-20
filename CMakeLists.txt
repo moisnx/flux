@@ -24,7 +24,7 @@ if(WIN32)
 
     if(MSVC)
         set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-          add_compile_options(/utf-8)
+        add_compile_options(/utf-8)
         add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
     endif()
 endif()
@@ -200,8 +200,9 @@ if(BUILD_STANDALONE)
     set(STANDALONE_SOURCES
         fx/main.cpp
         fx/src/theme_loader.cpp
+        fx/src/file_opener.cpp
     )
-    
+
     add_executable(fx ${STANDALONE_SOURCES})
 
     # Link to the main library 'flux' and curses
@@ -216,18 +217,17 @@ if(BUILD_STANDALONE)
     # Windows-specific settings for PDCursesMod
     if(WIN32)
         # CRITICAL: These must match how PDCursesMod was built
-        target_compile_definitions(fx PRIVATE 
-            PDC_STATIC          # Static linking
-            PDC_WIDE            # Wide character support
-            PDC_FORCE_UTF8      # UTF-8 support
+        target_compile_definitions(fx PRIVATE
+            PDC_STATIC # Static linking
+            PDC_WIDE # Wide character support
+            PDC_FORCE_UTF8 # UTF-8 support
         )
-        
+
         # Link additional Windows libraries
         target_link_libraries(fx PRIVATE winmm)
-        
+
         # If using MSVC, ensure static runtime
         if(MSVC)
-      
             target_compile_options(fx PRIVATE
                 $<$<CONFIG:Debug>:/MTd>
                 $<$<CONFIG:Release>:/MT>
@@ -235,23 +235,47 @@ if(BUILD_STANDALONE)
         endif()
     endif()
 
-    # Install binary only if installation is enabled
+    # Install binary and data files if installation is enabled
     if(FLUX_INSTALL)
+        # Install the binary
         install(TARGETS fx
             RUNTIME DESTINATION bin
         )
 
-        # Install default config and themes
-        install(DIRECTORY fx/themes/
-            DESTINATION share/flux/themes
-        )
+        # Install themes to system directory
+        if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/fx/config/themes)
+            install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/fx/config/themes/
+                DESTINATION share/fx/themes
+                FILES_MATCHING PATTERN "*.toml"
+            )
+        endif()
 
-        install(FILES fx/config/default.yaml
-            DESTINATION share/flux
-            RENAME config.yaml
-        )
+        # Install default config as example
+        if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/fx/config/config.toml)
+            install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/fx/config/config.toml
+                DESTINATION share/fx
+                RENAME config.toml.example
+            )
+        endif()
+
+        # Install documentation/README if it exists
+        if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/fx/README.md)
+            install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/fx/README.md
+                DESTINATION share/doc/fx
+            )
+        endif()
+
+        # Post-install message
+        message(STATUS "fx will be installed to: ${CMAKE_INSTALL_PREFIX}/bin")
+        message(STATUS "Themes will be installed to: ${CMAKE_INSTALL_PREFIX}/share/fx/themes")
+        message(STATUS "Example config will be at: ${CMAKE_INSTALL_PREFIX}/share/fx/config.toml.example")
+        message(STATUS "")
+        message(STATUS "After installation, run:")
+        message(STATUS "  fx --init-config")
+        message(STATUS "to initialize your user configuration at ~/.config/fx/")
     endif()
 endif()
+
 
 # ============================================
 # Examples

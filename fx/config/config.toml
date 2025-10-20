@@ -1,0 +1,39 @@
+[layout]
+panels = 1
+mode = "miller"
+show_hidden = false
+
+[appearance]
+theme = "gruvbox-dark"
+icons = true
+border_style = "rounded"
+
+[behavior]
+sort_dirs_first = true
+case_sensitive = false
+
+[file_handlers]
+default = "xdg-open"
+
+[[file_handlers.rules]]
+extensions = ["cpp", "h", "c", "hpp"]
+command = "nano"
+terminal = true
+
+[[fle_handlers.rules]]
+extensions = ["toml", "yaml"]
+command = "nano"
+terminal = true
+
+[[file_handlers.rules]]
+pattern = "*.md"
+command = "glow" # Markdown viewer
+
+[[file_handlers.rules]]
+mime_type = "image/*"
+command = "kitty +kitten icat" # Terminal image viewer
+
+[keybindings]
+quit = ["q", "ESC"]
+open = ["l", "RIGHT", "ENTER"]
+up = ["k", "UP"]

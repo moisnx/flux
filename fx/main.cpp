@@ -1,154 +1,184 @@
-#include "include/theme_loader.h"
+#include "include/config_loader.hpp"
+#include "include/file_opener.hpp"
+#include "include/theme_loader.hpp"
+
+#include <algorithm>
+#include <csignal>
 #include <cstdlib>
+#include <cstring>
 #include <flux.h>
 #include <iostream>
 #include <locale>
 
 #ifdef _WIN32
 #include <windows.h>
-#endif
-
-#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
-#include <shellapi.h>
-#endif
-
-#ifdef _WIN32
 #include <curses.h>
+#include <shellapi.h>
 #else
 #include <ncursesw/ncurses.h>
+#include <termios.h>
+#include <unistd.h>
 #endif
 
 #ifndef CTRL
 #define CTRL(c) ((c) & 0x1f)
 #endif
 
-#ifndef _WIN32
-#include <termios.h>
-#include <unistd.h>
-#endif
-
 void setup_terminal_attributes();
 void restore_terminal_attributes();
-void openFileWithDefaultApp(const std::string &filePath);
-// Global variable to store old terminal attributes
+void setup_signal_handlers();
+void fully_cleanup_terminal();
+void fully_reinit_terminal(flux::ThemeManager &theme_manager,
+                           const std::string &theme_name,
+                           const fx::Config &config);
+void openFileWithHandler(const std::string &filePath, const fx::Config &config,
+                         flux::ThemeManager &theme_manager,
+                         const std::string &theme_name);
+std::optional<fx::FileHandler> findMatchingHandler(const std::string &filePath,
+                                                   const fx::Config &config);
+
 #ifndef _WIN32
 struct termios original_termios;
+static struct sigaction original_sigwinch;
+static struct sigaction original_sigtstp;
+static struct sigaction original_sigcont;
 #endif
 
 void printUsage(const char *program_name) {
-  std::cout << "Flux - A modern terminal file browser\n\n";
+  std::cout << "fx - A modern terminal file browser\n\n";
   std::cout << "Usage: " << program_name << " [OPTIONS] [PATH]\n\n";
   std::cout << "Options:\n";
-  std::cout << "  -h, --help       Show this help message\n";
-  std::cout << "  -v, --version    Show version information\n";
-  std::cout << "  --theme NAME     Use specified theme (default, gruvbox, "
-               "nord, dracula)\n";
-  std::cout << "  --no-icons       Disable icons (use ASCII only)\n";
-  std::cout << "\n";
+  std::cout << "  -h, --help          Show this help message\n";
+  std::cout << "  -v, --version       Show version information\n";
+  std::cout << "  --init-config       Initialize config directory\n";
+  std::cout << "  --theme NAME        Override theme from config\n";
+  std::cout << "  --no-icons          Disable icons (use ASCII only)\n";
+  std::cout << "  --show-hidden       Show hidden files on startup\n";
+  std::cout << "  --strict            Enable command whitelist validation\n\n";
+  std::cout << "Configuration:\n";
+  std::cout << "  Local:  ./config/config.toml\n";
+  std::cout << "  Global: ~/.config/fx/config.toml\n\n";
+  std::cout << "Security:\n";
+  std::cout << "  Commands are executed without shell interpretation\n";
+  std::cout << "  Use --strict to enforce command whitelist\n\n";
   std::cout << "Keybindings:\n";
-  std::cout << "  j/k or ↑/↓       Navigate up/down\n";
-  std::cout << "  h or ←           Go to parent directory\n";
-  std::cout << "  l or → or Enter  Enter directory / open file\n";
-  std::cout << "  g/G              Go to top/bottom\n";
-  std::cout << "  .                Toggle hidden files\n";
+  std::cout << "  j/k or ↑/↓       Navigate\n";
+  std::cout << "  h or ←           Parent directory\n";
+  std::cout << "  l or → or Enter  Open directory/file\n";
+  std::cout << "  g/G              Top/Bottom\n";
+  std::cout << "  .                Toggle hidden\n";
   std::cout << "  s                Cycle sort mode\n";
   std::cout << "  q                Quit\n";
 }
 
 int main(int argc, char *argv[]) {
-  // Parse command line arguments
-  std::string start_path = ".";
-  std::string theme_name = "dracula";
-  bool use_icons = true;
-
   for (int i = 1; i < argc; ++i) {
     std::string arg = argv[i];
+
+    if (arg == "--init-config") {
+      std::cout << "Initializing global config...\n";
+      if (fx::ConfigLoader::initialize_global_config()) {
+        std::cout << "✓ Config initialized at ~/.config/fx/\n";
+        return 0;
+      } else {
+        std::cerr << "✗ Failed to initialize config\n";
+        return 1;
+      }
+    }
 
     if (arg == "-h" || arg == "--help") {
       printUsage(argv[0]);
       return 0;
-    } else if (arg == "-v" || arg == "--version") {
+    }
+
+    if (arg == "-v" || arg == "--version") {
       std::cout << "fx (Flux) version " << flux::getVersion() << "\n";
       return 0;
-    } else if (arg == "--theme") {
-      if (i + 1 < argc) {
-        theme_name = argv[++i];
-      } else {
-        std::cerr << "Error: --theme requires an argument\n";
-        return 1;
-      }
-    } else if (arg == "--no-icons") {
+    }
+  }
+
+  fx::Config config = fx::ConfigLoader::load();
+
+  std::string start_path = ".";
+  std::string theme_name = config.theme;
+  bool use_icons = config.icons;
+  bool show_hidden = config.show_hidden;
+  bool strict_mode = false;
+
+  for (int i = 1; i < argc; ++i) {
+    std::string arg = argv[i];
+
+    if (arg == "--theme" && i + 1 < argc)
+      theme_name = argv[++i];
+    else if (arg == "--no-icons")
       use_icons = false;
-    } else if (arg[0] != '-') {
+    else if (arg == "--show-hidden")
+      show_hidden = true;
+    else if (arg == "--strict")
+      strict_mode = true;
+    else if (arg[0] != '-')
       start_path = arg;
-    } else {
+    else if (arg != "-h" && arg != "--help" && arg != "-v" &&
+             arg != "--version" && arg != "--init-config") {
       std::cerr << "Unknown option: " << arg << "\n";
-      std::cerr << "Try '" << argv[0] << " --help' for more information.\n";
+      std::cerr << "Try '" << argv[0] << " --help'\n";
       return 1;
     }
   }
 
-  // Set UTF-8 locale for proper icon rendering
+  if (strict_mode)
+    std::cerr << "[fx] Strict mode: command whitelist enabled\n";
+
   std::setlocale(LC_ALL, "");
 
   setup_terminal_attributes();
+  setup_signal_handlers();
 
-  // Initialize ncurses
   initscr();
   cbreak();
   noecho();
   keypad(stdscr, TRUE);
-  curs_set(0); // Hide cursor
+  curs_set(0);
+  set_escdelay(25);
 
   if (has_colors()) {
     start_color();
     use_default_colors();
   }
 
-  // Create browser and renderer
   flux::Browser browser(start_path);
   flux::Renderer renderer;
 
-  // IMPORTANT: Create ThemeManager in STANDALONE mode (default)
-  flux::ThemeManager theme_manager;
-  // theme_manager.setEmbeddedMode(false); // This is the default
+  if (show_hidden)
+    browser.toggleHidden();
 
+  flux::ThemeManager theme_manager;
   flux::Theme theme;
 
-  // Load theme from file
   auto theme_path = fx::ThemeLoader::findThemeFile(theme_name);
   if (theme_path) {
-    std::cerr << "Loading theme from: " << *theme_path << "\n";
+    std::cerr << "[fx] Loading theme: " << theme_name << " from " << *theme_path
+              << "\n";
     auto def = fx::ThemeLoader::loadFromTOML(*theme_path);
-    std::cerr << "Background: " << def.background << std::endl;
-
-    // Apply theme - this WILL call init_pair() in standalone mode
     theme = theme_manager.applyThemeDefinition(def);
 
-    // Set background if theme specifies one
     if (def.background != "transparent" && def.background != "default" &&
-        !def.background.empty()) {
+        !def.background.empty())
       bkgd(COLOR_PAIR(theme.background));
-    }
   } else {
-    std::cerr << "Theme '" << theme_name << "' not found, using default\n";
+    std::cerr << "[fx] Theme '" << theme_name << "' not found, using default\n";
     theme = theme_manager.applyThemeDefinition(
         flux::ThemeManager::getDefaultThemeDef());
     bkgd(COLOR_PAIR(theme.background));
   }
 
   renderer.setTheme(theme);
-
-  // Set icon style
-  if (use_icons) {
-    renderer.setIconStyle(IconStyle::AUTO);
-  } else {
-    renderer.setIconStyle(IconStyle::ASCII);
-  }
+  renderer.setIconStyle(use_icons ? IconStyle::AUTO : IconStyle::ASCII);
 
   int ch;
   bool running = true;
+
   while (running) {
     browser.updateScroll(renderer.getViewportHeight());
     renderer.render(browser);
@@ -200,8 +230,8 @@ int main(int argc, char *argv[]) {
       running = false;
       break;
     case KEY_RESIZE:
+      clearok(stdscr, TRUE);
       break;
-
     case KEY_RIGHT:
     case KEY_ENTER:
     case 10:
@@ -210,8 +240,11 @@ int main(int argc, char *argv[]) {
         browser.navigateInto(browser.getSelectedIndex());
       } else {
         const std::string selected_file = browser.getSelectedPath()->string();
-        openFileWithDefaultApp(selected_file);
-        break;
+        openFileWithHandler(selected_file, config, theme_manager, theme_name);
+        browser.refresh();
+        renderer.setTheme(theme);
+        clearok(stdscr, TRUE);
+        refresh();
       }
       break;
     }
@@ -223,109 +256,128 @@ int main(int argc, char *argv[]) {
   return 0;
 }
 
+std::optional<fx::FileHandler> findMatchingHandler(const std::string &filePath,
+                                                   const fx::Config &config) {
+  std::filesystem::path path(filePath);
+  std::string extension = path.extension().string();
+
+  if (!extension.empty() && extension[0] == '.')
+    extension = extension.substr(1);
+
+  for (const auto &handler : config.handler_rules) {
+    for (const auto &ext : handler.extensions)
+      if (extension == ext)
+        return handler;
+
+    if (!handler.pattern.empty() && handler.pattern.substr(0, 2) == "*.") {
+      std::string pattern_ext = handler.pattern.substr(2);
+      if (extension == pattern_ext)
+        return handler;
+    }
+  }
+
+  return std::nullopt;
+}
+
+void fully_cleanup_terminal() {
+#ifndef _WIN32
+  sigaction(SIGWINCH, &original_sigwinch, nullptr);
+  sigaction(SIGTSTP, &original_sigtstp, nullptr);
+  sigaction(SIGCONT, &original_sigcont, nullptr);
+#endif
+
+  if (!isendwin())
+    endwin();
+  restore_terminal_attributes();
+
+  std::cout << "\033[0m\033[?1049l\033[?25h";
+  std::cout.flush();
+
+  if (has_colors()) {
+    for (int i = 0; i < std::min(COLOR_PAIRS, 256); ++i)
+      init_pair(i, -1, -1);
+  }
+}
+
+void fully_reinit_terminal(flux::ThemeManager &theme_manager,
+                           const std::string &theme_name,
+                           const fx::Config &config) {
+  usleep(100000);
+  std::cout << "\033c" << std::flush;
+
+  initscr();
+  cbreak();
+  noecho();
+  keypad(stdscr, TRUE);
+  curs_set(0);
+  set_escdelay(25);
+
+  if (has_colors()) {
+    start_color();
+    use_default_colors();
+
+    auto theme_path = fx::ThemeLoader::findThemeFile(theme_name);
+    if (theme_path) {
+      auto def = fx::ThemeLoader::loadFromTOML(*theme_path);
+      theme_manager.applyThemeDefinition(def);
+    }
+  }
+
+  clearok(stdscr, TRUE);
+  refresh();
+}
+
+void openFileWithHandler(const std::string &filePath, const fx::Config &config,
+                         flux::ThemeManager &theme_manager,
+                         const std::string &theme_name) {
+  auto handler = findMatchingHandler(filePath, config);
+  fully_cleanup_terminal();
+
+  fx::FileOpener::OpenResult result;
+
+  if (handler) {
+    fx::FileOpener::OpenConfig open_config;
+    open_config.command = handler->command;
+    open_config.wait_for_completion = handler->terminal;
+    open_config.validate_command = false;
+
+    std::cerr << "[fx] Opening with handler: " << handler->command << "\n";
+    result = fx::FileOpener::openWith(filePath, open_config);
+    usleep(handler->terminal ? 200000 : 100000);
+  } else {
+    std::cerr << "[fx] Opening with default handler\n";
+    result = fx::FileOpener::openWithDefault(filePath);
+    usleep(100000);
+  }
+
+  if (!result.success) {
+    std::cerr << "Error: " << result.error_message
+              << "\nPress Enter to continue...";
+    std::cin.get();
+  }
+
+  fully_reinit_terminal(theme_manager, theme_name, config);
+}
+
 void setup_terminal_attributes() {
 #ifndef _WIN32
-  // Get current terminal settings and store them
   tcgetattr(STDIN_FILENO, &original_termios);
   struct termios new_termios = original_termios;
-
-  // Disable software flow control (IXON)
   new_termios.c_iflag &= ~IXON;
-
-  // Apply the new settings
   tcsetattr(STDIN_FILENO, TCSANOW, &new_termios);
 #endif
 }
 
 void restore_terminal_attributes() {
 #ifndef _WIN32
-  // Restore the original terminal settings
   tcsetattr(STDIN_FILENO, TCSANOW, &original_termios);
 #endif
 }
 
-void openFileWithDefaultApp(const std::string &filePath) {
-#ifdef _WIN32
-  // 1. Restore terminal state BEFORE launching the external app
-  endwin();                      // Close ncurses screen mode
-  restore_terminal_attributes(); // Restore custom terminal settings (though
-                                 // ncurses endwin() should cover most)
-
-  SHELLEXECUTEINFOA sei = {sizeof(sei)};
-  sei.lpFile = filePath.c_str();
-  sei.nShow = SW_SHOWNORMAL;
-  sei.lpVerb = "open";
-  sei.fMask =
-      SEE_MASK_NOCLOSEPROCESS |
-      SEE_MASK_FLAG_NO_UI; // Crucial: get process handle and suppress errors
-
-  if (ShellExecuteExA(&sei)) {
-    if (sei.hProcess) {
-      // 2. Wait for the external process to close
-      WaitForSingleObject(sei.hProcess, INFINITE);
-      CloseHandle(sei.hProcess);
-    }
-  } else {
-    std::cerr << "Error launching file on Windows." << std::endl;
-  }
-
-  // 3. Reinitialize ncurses and refresh the screen
-  refresh(); // Re-enters ncurses mode
-  // You may need to call the ncurses setup functions again, or at least
-  // doupdate() A simple 'refresh()' will re-enter ncurses mode and redraw the
-  // screen, but often a full redraw with 'doupdate()' or 'redrawwin(stdscr);
-  // doupdate();' is safer.
-  redrawwin(stdscr);
-  doupdate();
-
-#elif __APPLE__ || __linux__
-  // Unix/Linux/macOS (using std::system)
-  // std::system() already waits for the command to finish, so we only need the
-  // suspend/resume
-
-  // 1. Restore terminal state BEFORE launching the external app
-  endwin();
-  restore_terminal_attributes();
-
-  std::string command;
-#ifdef __APPLE__
-  command = "open \"" + filePath + "\"";
-#else
-  command = "xdg-open \"" + filePath + "\"";
-#endif
-
-  int result = std::system(command.c_str());
-
-  if (result != 0) {
-    std::cerr << "Error opening file. Command: " << command << std::endl;
-  }
-
-  // 2. Reinitialize ncurses and refresh the screen
-  // The main loop will call refresh() implicitly, but you must call initscr()
-  // again
-  initscr(); // Re-enters ncurses mode
-  cbreak();
-  noecho();
-  keypad(stdscr, TRUE);
-  curs_set(0); // Hide cursor
-
-  // Re-run color setup if necessary, and re-apply the background
-  if (has_colors()) {
-    start_color();
-    use_default_colors();
-  }
-
-  // The theme/color pairs should still be initialized, but you might need to
-  // re-apply the background: (This part depends on your flux::ThemeManager
-  // implementation, but for simplicity, we'll assume the main loop will take
-  // care of the full render shortly)
-
-  redrawwin(stdscr);
-  doupdate();
-
-#else
-  // Other/Unknown OS
-  std::cerr << "File opening not supported for this operating system."
-            << std::endl;
+void setup_signal_handlers() {
+#ifndef _WIN32
+  sigaction(SIGWINCH, nullptr, &original_sigwinch);
+  sigaction(SIGTSTP, nullptr, &original_sigtstp);
+  sigaction(SIGCONT, nullptr, &original_sigcont);
 #endif
 }
