@@ -1,3 +1,6 @@
-[submodule "deps/pdcursesmod"]
-	path = deps/pdcursesmod
+[submodule "deps/pdcurses"]
+	path = deps/pdcurses
+	url = https://github.com/wmcbrine/PDCurses.git
+[submodule "deps/PDCursesMod"]
+	path = deps/PDCursesMod
 	url = https://github.com/Bill-Gray/PDCursesMod
