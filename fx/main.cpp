@@ -81,7 +81,6 @@ void suspendTerminal() {
     endwin();
   }
 
-
   std::cout << "\033[0m" << std::flush;   // Reset attributes
   std::cout << "\033[?25h" << std::flush; // Show cursor
 }
@@ -235,6 +234,7 @@ int main(int argc, char *argv[]) {
     std::cerr << "[fx] Theme '" << theme_name << "' not found, using default\n";
     theme = theme_manager.applyThemeDefinition(
         flux::ThemeManager::getDefaultThemeDef());
+    fx::InputPrompt::setTheme(theme);
     g_theme = theme;
     bkgd(COLOR_PAIR(theme.background));
   }
@@ -286,7 +286,7 @@ int main(int argc, char *argv[]) {
     case 's':
       browser.cycleSortMode();
       break;
-    case 'r':
+    case 'R':
     case KEY_F(5):
       browser.refresh();
       break;
@@ -353,6 +353,43 @@ int main(int argc, char *argv[]) {
         }
       }
       break;
+    }
+    case 'r': {
+      const std::string default_name =
+          browser.getEntryByIndex(browser.getSelectedIndex())->name;
+      auto name = fx::InputPrompt::getString("Rename: ", default_name);
+      if (name) {
+        if (browser.renameEntry(browser.getSelectedIndex(), *name)) {
+          // Success
+        } else {
+          std::string error = browser.getErrorMessage();
+          move(LINES - 1, 0);
+          clrtoeol();
+          attron(A_BOLD | COLOR_PAIR(1)); // Assuming color pair 1 is red/error
+          mvprintw(LINES - 1, 0, "Error: %s", error.c_str());
+          attroff(A_BOLD | COLOR_PAIR(1));
+          refresh();
+          napms(2000); // Show error for 2 seconds
+        }
+      }
+    }
+    case 'd': {
+
+      if (fx::InputPrompt::getConfirmation(
+              "Do you want to remove this file/folder? ")) {
+        if (browser.removeEntry(browser.getSelectedIndex())) {
+          // Success
+        } else {
+          std::string error = browser.getErrorMessage();
+          move(LINES - 1, 0);
+          clrtoeol();
+          attron(A_BOLD | COLOR_PAIR(1)); // Assuming color pair 1 is
+          mvprintw(LINES - 1, 0, "Error: %s", error.c_str());
+          attroff(A_BOLD | COLOR_PAIR(1));
+          refresh();
+          napms(2000); // Show error for 2 seconds
+        }
+      }
     }
     }
   }

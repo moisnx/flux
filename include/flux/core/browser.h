@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <ctime>
 #include <filesystem>
 #include <optional>
@@ -48,6 +49,15 @@ public:
 
   // Getters
   const std::vector<FileEntry> &getEntries() const { return entries_; }
+
+  std::optional<FileEntry> getEntryByIndex(size_t index) const {
+    if (index >= entries_.size()) {
+      return std::nullopt;
+    }
+
+    return entries_[index];
+  }
+
   size_t getSelectedIndex() const { return selected_index_; }
   size_t getScrollOffset() const { return scroll_offset_; }
   const fs::path &getCurrentPath() const { return current_path_; }
@@ -71,9 +81,12 @@ public:
 
   // File actions
   bool deleteFile(size_t index);
-  bool renameFile(size_t index, const std::string &new_name);
   bool createFile(const std::string &name);
   bool createDirectory(const std::string &name);
+  bool renameEntry(size_t index, const std::string &new_name);
+  bool removeEntry(size_t index);
+
+  bool executePaste(const std::vector<fs::path> &source_paths, bool is_cut);
 
   // Statistics
   size_t getDirectoryCount() const;

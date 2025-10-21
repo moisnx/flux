@@ -8,6 +8,7 @@
 #include "flux/core/browser.h"
 
 // UI
+#include "flux/core/file_clipboard.h"
 #include "flux/ui/icon_provider.h"
 #include "flux/ui/renderer.h"
 #include "flux/ui/theme.h"

@@ -1,5 +1,8 @@
 #include "flux/core/browser.h"
 #include <algorithm>
+#include <cstddef>
+#include <exception>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sys/stat.h>
@@ -465,4 +468,99 @@ bool Browser::createDirectory(const std::string &name) {
     setError(std::string("Failed to create directory: ") + e.what());
     return false;
   }
+}
+
+bool Browser::renameEntry(size_t index, const std::string &new_name) {
+  clearError();
+
+  if (new_name.empty()) {
+    setError("File name cannot be empty");
+    return false;
+  }
+
+  // Check for invalid characters
+  if (new_name.find('/') != std::string::npos ||
+      new_name.find('\\') != std::string::npos ||
+      new_name.find('\0') != std::string::npos) {
+    setError("Invalid characters in file name");
+    return false;
+  }
+  fs::path new_file_path = current_path_ / new_name;
+
+  // Check if already exists
+  if (fs::exists(new_file_path)) {
+    setError("File already exists");
+    return false;
+  }
+
+  try {
+    // Get current path
+    const std::string current_path = getSelectedPath()->string();
+    fs::rename(current_path, new_file_path);
+
+    // Refresh directory to show new file
+    refresh();
+
+    // Auto-select the new file
+    for (size_t i = 0; i < entries_.size(); ++i) {
+      if (entries_[i].name == new_name) {
+        selected_index_ = i;
+        break;
+      }
+    }
+    return true;
+  } catch (const std::exception &e) {
+    setError(std::string("Failed to rename file: ") + e.what());
+    return false;
+  }
+}
+
+bool Browser::removeEntry(size_t index) {
+  // Check if the index is in the bounds
+  if (index >= entries_.size()) {
+    setError("The index is beyond the bounds");
+    return false;
+  }
+
+  // Check if the file or folder exists first.
+
+  auto entry = getEntryByIndex(index);
+  if (!fs::exists(entry->full_path)) {
+    setError("The file or folder does not exist.");
+    return false;
+  }
+  try {
+    if (entry->is_directory) {
+      fs::remove_all(entry->full_path);
+    } else {
+      fs::remove(entry->full_path);
+    }
+
+    // Refresh directory to reflect deletion
+    refresh();
+
+    // Adjust selection if needed
+    if (selected_index_ >= entries_.size() && !entries_.empty()) {
+      selected_index_ = entries_.size() - 1;
+    }
+
+    return true;
+  } catch (const std::exception &e) {
+    setError("Failed to remove file or directory.");
+    return false;
+  }
+  return false;
+}
+
+bool Browser::executePaste(const std::vector<fs::path> &source_paths,
+                           bool is_cut) {
+  clearError();
+  if (source_paths.empty()) {
+    setError("At least 1 file required to paste.");
+    return false;
+  }
+
+  for (size_t i = 0; i < source_paths.size(); i++) {
+  }
+  return false;
 }

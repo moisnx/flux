@@ -117,6 +117,7 @@ endif()
 
 set(FLUX_CORE_SOURCES
     src/core/browser.cpp
+    src/core/file_clipboard.cpp
     # src/core/file_ops.cpp
     # src/core/selection.cpp
     # src/core/search.cpp
