@@ -1,5 +1,6 @@
 #include "include/file_opener.hpp"
 #include <algorithm>
+#include <fcntl.h>
 #include <iostream>
 
 #ifdef _WIN32
@@ -188,7 +189,21 @@ bool FileOpener::executeUnix(const std::vector<std::string> &parts,
   }
 
   if (pid == 0) {
-    // Child process executes command
+    // Child process - redirect stdout/stderr to prevent terminal corruption
+    if (!wait) {
+      // For non-blocking processes, redirect to /dev/null
+      int devnull = open("/dev/null", O_WRONLY);
+      if (devnull != -1) {
+        dup2(devnull, STDOUT_FILENO);
+        dup2(devnull, STDERR_FILENO);
+        close(devnull);
+      }
+
+      // Detach from terminal for GUI apps
+      setsid();
+    }
+
+    // Build argument list
     std::vector<const char *> args;
     args.push_back(parts[0].c_str());
     for (size_t i = 1; i < parts.size(); ++i)
@@ -198,21 +213,43 @@ bool FileOpener::executeUnix(const std::vector<std::string> &parts,
     args.push_back(path_str.c_str());
     args.push_back(nullptr);
 
+    // Execute command
     execvp(args[0], const_cast<char *const *>(args.data()));
+
+    // If execvp fails, exit immediately
     _exit(127);
   }
 
   // Parent process
   if (wait) {
     int status;
-    waitpid(pid, &status, 0);
+    pid_t result = waitpid(pid, &status, 0);
+
     if (resume_callback_)
       resume_callback_();
-    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+
+    if (result == -1) {
+      return false;
+    }
+
+    // Check if process exited normally
+    if (WIFEXITED(status)) {
+      int exit_code = WEXITSTATUS(status);
+      return exit_code == 0;
+    }
+
+    // Process was killed by signal
+    if (WIFSIGNALED(status)) {
+      return false;
+    }
+
+    return false;
   }
 
+  // Non-blocking: resume immediately
   if (resume_callback_)
     resume_callback_();
+
   return true;
 }
 #endif
@@ -339,6 +376,15 @@ FileOpener::openWithDefault(const std::string &file_path) {
   }
 
   if (pid == 0) {
+    // Redirect output for GUI apps
+    int devnull = open("/dev/null", O_WRONLY);
+    if (devnull != -1) {
+      dup2(devnull, STDOUT_FILENO);
+      dup2(devnull, STDERR_FILENO);
+      close(devnull);
+    }
+    setsid();
+
     const char *args[] = {"open", path_str.c_str(), nullptr};
     execvp("open", const_cast<char *const *>(args));
     _exit(127);
@@ -357,10 +403,22 @@ FileOpener::openWithDefault(const std::string &file_path) {
   }
 
   if (pid == 0) {
+    // Redirect output to prevent terminal corruption
+    int devnull = open("/dev/null", O_WRONLY);
+    if (devnull != -1) {
+      dup2(devnull, STDOUT_FILENO);
+      dup2(devnull, STDERR_FILENO);
+      close(devnull);
+    }
+    setsid();
+
     const char *args[] = {"xdg-open", path_str.c_str(), nullptr};
     execvp("xdg-open", const_cast<char *const *>(args));
     _exit(127);
   }
+
+  // Small delay to let xdg-open spawn its child
+  usleep(100000); // 100ms
 
   if (resume_callback_)
     resume_callback_();

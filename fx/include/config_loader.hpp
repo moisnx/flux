@@ -116,7 +116,7 @@ public:
       return cfg;
     }
 
-    std::cout << "[fx] Loading config from: " << *config_path << "\n";
+    // std::cout << "[fx] Loading config from: " << *config_path << "\n";
     return load_from_file(*config_path);
   }
 

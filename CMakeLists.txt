@@ -201,6 +201,7 @@ if(BUILD_STANDALONE)
         fx/main.cpp
         fx/src/theme_loader.cpp
         fx/src/file_opener.cpp
+        fx/src/input_prompt.cpp
     )
 
     add_executable(fx ${STANDALONE_SOURCES})

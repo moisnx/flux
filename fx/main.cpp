@@ -1,5 +1,6 @@
 #include "include/config_loader.hpp"
 #include "include/file_opener.hpp"
+#include "include/input_prompt.hpp"
 #include "include/theme_loader.hpp"
 
 #include <algorithm>
@@ -75,34 +76,33 @@ void suspendTerminal() {
   // Save terminal mode
   def_prog_mode();
 
-  // Clean up ncurses
+  // Clean up ncurses gracefully
   if (!isendwin()) {
     endwin();
   }
 
-  // Reset terminal to normal mode
-  std::cout << "\033[0m" << std::flush; // Reset attributes
+
+  std::cout << "\033[0m" << std::flush;   // Reset attributes
+  std::cout << "\033[?25h" << std::flush; // Show cursor
 }
 
 void resumeTerminal() {
-  // Small delay to let external program fully exit
-  usleep(50000); // 50ms - much shorter than before!
-
-  // Reset terminal completely
-  std::cout << "\033c" << std::flush;
+  // Minimal delay - just enough for the process to fully exit
+  usleep(50000);
 
   // Reinitialize ncurses
-  refresh(); // This calls doupdate() which reinitializes
-
-  // Restore terminal mode
+  refresh();
   reset_prog_mode();
 
-  // Reconfigure ncurses
+  // Reconfigure ncurses settings
   cbreak();
   noecho();
   keypad(stdscr, TRUE);
   curs_set(0);
   set_escdelay(25);
+
+  // Clear any pending input
+  flushinp();
 
   // Reapply colors and theme
   if (has_colors() && g_theme_manager) {
@@ -121,8 +121,8 @@ void resumeTerminal() {
     }
   }
 
-  // Force complete redraw
   clearok(stdscr, TRUE);
+  clear();
   refresh();
 }
 
@@ -313,6 +313,47 @@ int main(int argc, char *argv[]) {
       }
       break;
     }
+
+    case 'a': // Create file
+    case 'n': {
+      auto name = fx::InputPrompt::getString("New file: ");
+      if (name) {
+        if (browser.createFile(*name)) {
+          // Success - file created and selected
+        } else {
+          // Show error (browser already has error set)
+          std::string error = browser.getErrorMessage();
+          move(LINES - 1, 0);
+          clrtoeol();
+          attron(A_BOLD | COLOR_PAIR(1)); // Assuming color pair 1 is red/error
+          mvprintw(LINES - 1, 0, "Error: %s", error.c_str());
+          attroff(A_BOLD | COLOR_PAIR(1));
+          refresh();
+          napms(2000); // Show error for 2 seconds
+        }
+      }
+      break;
+    }
+    case 'A': // Create directory
+    case 'N': {
+      auto name = fx::InputPrompt::getString("New directory: ");
+      if (name) {
+        if (browser.createDirectory(*name)) {
+          // Success - directory created and selected
+        } else {
+          // Show error
+          std::string error = browser.getErrorMessage();
+          move(LINES - 1, 0);
+          clrtoeol();
+          attron(A_BOLD | COLOR_PAIR(1));
+          mvprintw(LINES - 1, 0, "Error: %s", error.c_str());
+          attroff(A_BOLD | COLOR_PAIR(1));
+          refresh();
+          napms(2000);
+        }
+      }
+      break;
+    }
     }
   }
 
@@ -364,11 +405,22 @@ void openFileWithHandler(const std::string &filePath,
   }
 
   if (!result.success) {
-    // Show error without messing up terminal state
-    std::cerr << "\n[fx] Error: " << result.error_message << "\n";
+    // Ensure terminal is in a clean state before showing error
+    if (!isendwin()) {
+      suspendTerminal();
+    }
+
+    std::cerr << "\n╭─────────────────────────────────────╮\n";
+    std::cerr << "│ Error Opening File                  │\n";
+    std::cerr << "╰─────────────────────────────────────╯\n";
+    std::cerr << "\n" << result.error_message << "\n\n";
     std::cerr << "Press Enter to continue...";
-    std::cin.ignore();
+    std::cin.clear();
+    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
     std::cin.get();
+
+    // Resume terminal
+    resumeTerminal();
   }
 }
 

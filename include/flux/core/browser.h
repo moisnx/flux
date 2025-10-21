@@ -65,8 +65,15 @@ public:
     show_hidden_ = !show_hidden_;
     refresh();
   }
+
   void cycleSortMode();
   void updateScroll(size_t viewport_height);
+
+  // File actions
+  bool deleteFile(size_t index);
+  bool renameFile(size_t index, const std::string &new_name);
+  bool createFile(const std::string &name);
+  bool createDirectory(const std::string &name);
 
   // Statistics
   size_t getDirectoryCount() const;

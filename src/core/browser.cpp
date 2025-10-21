@@ -1,5 +1,6 @@
 #include "flux/core/browser.h"
 #include <algorithm>
+#include <fstream>
 #include <iostream>
 #include <sys/stat.h>
 
@@ -366,4 +367,102 @@ bool Browser::isExecutable(const fs::path &path) const {
   }
   return false;
 #endif
+}
+
+// File Operations
+
+bool Browser::createFile(const std::string &name) {
+  clearError();
+
+  if (name.empty()) {
+    setError("File name cannot be empty");
+    return false;
+  }
+
+  // Check for invalid characters
+  if (name.find('/') != std::string::npos ||
+      name.find('\\') != std::string::npos ||
+      name.find('\0') != std::string::npos) {
+    setError("Invalid characters in file name");
+    return false;
+  }
+
+  fs::path new_file_path = current_path_ / name;
+
+  // Check if already exists
+  if (fs::exists(new_file_path)) {
+    setError("File already exists");
+    return false;
+  }
+
+  try {
+    // Create empty file
+    std::ofstream file(new_file_path);
+    if (!file) {
+      setError("Failed to create file");
+      return false;
+    }
+    file.close();
+
+    // Refresh directory to show new file
+    refresh();
+
+    // Auto-select the new file
+    for (size_t i = 0; i < entries_.size(); ++i) {
+      if (entries_[i].name == name) {
+        selected_index_ = i;
+        break;
+      }
+    }
+
+    return true;
+  } catch (const std::exception &e) {
+    setError(std::string("Failed to create file: ") + e.what());
+    return false;
+  }
+}
+
+bool Browser::createDirectory(const std::string &name) {
+  clearError();
+
+  if (name.empty()) {
+    setError("Directory name cannot be empty");
+    return false;
+  }
+
+  // Check for invalid characters
+  if (name.find('/') != std::string::npos ||
+      name.find('\\') != std::string::npos ||
+      name.find('\0') != std::string::npos) {
+    setError("Invalid characters in directory name");
+    return false;
+  }
+
+  fs::path new_dir_path = current_path_ / name;
+
+  // Check if already exists
+  if (fs::exists(new_dir_path)) {
+    setError("Directory already exists");
+    return false;
+  }
+
+  try {
+    fs::create_directory(new_dir_path);
+
+    // Refresh directory to show new folder
+    refresh();
+
+    // Auto-select the new directory
+    for (size_t i = 0; i < entries_.size(); ++i) {
+      if (entries_[i].name == name) {
+        selected_index_ = i;
+        break;
+      }
+    }
+
+    return true;
+  } catch (const std::exception &e) {
+    setError(std::string("Failed to create directory: ") + e.what());
+    return false;
+  }
 }
