@@ -76,15 +76,14 @@ void Renderer::render(const Browser &browser) {
   ncplane_dim_yx(stdplane_, &height, &width);
   viewport_height_ = std::max(1, static_cast<int>(height) - 4);
 
-  // CRITICAL FIX: Erase with proper background color
-  // First set the channels for erasing
   uint64_t erase_channels = 0;
-  ncchannels_set_fg_rgb8(&erase_channels, (theme_.foreground >> 16) & 0xFF,
-                         (theme_.foreground >> 8) & 0xFF,
-                         theme_.foreground & 0xFF);
-  ncchannels_set_bg_rgb8(&erase_channels, (theme_.background >> 16) & 0xFF,
-                         (theme_.background >> 8) & 0xFF,
-                         theme_.background & 0xFF);
+  ncchannels_set_fg_rgb(&erase_channels, theme_.foreground);
+
+  if (theme_.use_default_bg) {
+    ncchannels_set_bg_default(&erase_channels);
+  } else {
+    ncchannels_set_bg_rgb(&erase_channels, theme_.background);
+  }
   ncplane_set_channels(stdplane_, erase_channels);
 
   ncplane_set_styles(stdplane_, NCSTYLE_NONE);
@@ -95,7 +94,6 @@ void Renderer::render(const Browser &browser) {
   renderStatus(browser);
   notcurses_render(nc_);
 }
-
 void Renderer::renderHeader(const Browser &browser) {
   unsigned width, height;
   ncplane_dim_yx(stdplane_, &height, &width);
@@ -421,7 +419,16 @@ void Renderer::renderStatus(const Browser &browser) {
   // Help line
   status_y++;
   ncplane_cursor_move_yx(stdplane_, status_y, 0);
-  setColors(theme_.ui_secondary, theme_.background);
+
+  uint64_t help_channels = 0;
+  ncchannels_set_fg_rgb(&help_channels, theme_.ui_secondary);
+
+  if (theme_.use_default_bg) {
+    ncchannels_set_bg_default(&help_channels);
+  } else {
+    ncchannels_set_bg_rgb(&help_channels, theme_.background);
+  }
+  ncplane_set_channels(stdplane_, help_channels);
 
   ncplane_putstr(stdplane_, " ");
   ncplane_set_styles(stdplane_, NCSTYLE_BOLD);

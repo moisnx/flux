@@ -1,8 +1,8 @@
 # Flux
 
-> A blazingly fast, beautiful terminal file browser built with C++ and ncurses
+> A blazingly fast, beautiful terminal file browser built with C++ and Notcurses
 
-**Flux** (`fx`) is a modern file browser for the terminal that combines the speed of C++ with gorgeous UI design. Built with a clean, modular architecture, Flux provides both a standalone file browser and a flexible API for building custom file explorers on different GUI/TUI frameworks.
+**Flux** (`fx`) is a modern file browser for the terminal that combines the speed of C++ with gorgeous UI design powered by Notcurses. Built with a clean, modular architecture, Flux provides both a standalone file browser and a flexible API for building custom file management applications.
 
 ![Version](https://img.shields.io/badge/version-0.1.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -14,12 +14,13 @@
 
 - **Lightning fast** - Instant startup and snappy navigation
 - **Beautiful themes** - Multiple color schemes with full customization
+- **True color support** - Powered by Notcurses for rich terminal graphics
 - **Nerd Font icons** - File type icons using Nerd Fonts
 - **Vim-like navigation** - hjkl keybindings for efficient browsing
 - **Smart sorting** - Sort by name, size, date, or type
 - **Hidden files** - Toggle visibility with a single key
 - **File operations** - Copy, paste, delete, rename, and create files/directories
-- **Flexible API** - Build custom file explorers for your GUI/TUI framework
+- **Flexible API** - Build custom file management tools on top of Flux
 
 ### Coming Soon
 
@@ -41,17 +42,20 @@
 
 - CMake 3.16+
 - C++20 compatible compiler (GCC 10+, Clang 11+, MSVC 2019+)
-- ncursesw (Linux/macOS) or PDCursesMod (Windows)
+- Notcurses library (3.0+)
 
 **Linux/macOS:**
 
 ```bash
 # Install dependencies
 # Ubuntu/Debian:
-sudo apt-get install libncursesw5-dev
+sudo apt-get install libnotcurses-dev
+
+# Arch Linux:
+sudo pacman -S notcurses
 
 # macOS:
-brew install ncurses
+brew install notcurses
 
 # Build
 git clone https://github.com/moisnx/flux.git
@@ -62,13 +66,16 @@ make
 sudo make install
 ```
 
-**Windows:**
+**Windows (MSYS2):**
 
 ```bash
-# Using MSVC (requires PDCursesMod built separately)
+# Install Notcurses via MSYS2
+pacman -S mingw-w64-x86_64-notcurses
+
+# Build in MSYS2 MinGW64 environment
 mkdir build && cd build
-cmake .. -G "Visual Studio 17 2022"
-cmake --build . --config Release
+cmake .. -G "MinGW Makefiles"
+make
 ```
 
 ### Usage
@@ -100,14 +107,14 @@ fx --help
 | `l` / `→` / `Enter`    | Enter directory / open file |
 | `g`                    | Jump to top                 |
 | `G`                    | Jump to bottom              |
-| `.`                    | Toggle hidden files         |
+| `.` / `H`              | Toggle hidden files         |
 | `s`                    | Cycle sort mode             |
-| `r` / `F5`             | Refresh directory           |
-| `yy`                   | Copy (yank) file            |
-| `dd`                   | Cut file                    |
-| `p`                    | Paste file                  |
-| `x`                    | Delete file                 |
-| `n`                    | Create new file/directory   |
+| `R` / `F5`             | Refresh directory           |
+| `a` / `n`              | Create new file             |
+| `A` / `N`              | Create new directory        |
+| `r`                    | Rename file/directory       |
+| `d`                    | Delete file/directory       |
+| `t` / `T`              | Theme selector              |
 | `q` / `Ctrl+Q` / `Esc` | Quit                        |
 
 ## 🎨 Themes
@@ -123,10 +130,10 @@ Flux comes with several beautiful built-in themes:
 
 ### Custom Themes
 
-Create a TOML file in `~/.config/flux/themes/`:
+Create a TOML file in `~/.config/fx/themes/`:
 
 ```toml
-# ~/.config/flux/themes/mytheme.toml
+# ~/.config/fx/themes/mytheme.toml
 name = "My Custom Theme"
 
 [colors]
@@ -158,9 +165,9 @@ fx --theme mytheme
 
 **Note:** Use `"transparent"` for background to use your terminal's background color.
 
-## Building Custom File Explorers
+## Building on Top of Flux
 
-Flux provides a clean API for building file explorers in your own applications. The core components (`Browser`, `FileClipboard`, `Theme`, `IconProvider`) are framework-agnostic and can be integrated into any GUI or TUI toolkit.
+Flux provides a clean API for building file management applications. The core components (`Browser`, `FileClipboard`) are framework-agnostic and can be integrated into any application - whether you want to build a GUI file manager, a custom TUI, or integrate file browsing into your existing tools.
 
 ### Architecture Overview
 
@@ -168,38 +175,29 @@ Flux is organized into modular components:
 
 - **`flux::Browser`** - Core file browsing logic (navigation, sorting, filtering)
 - **`flux::FileClipboard`** - File operation handling (copy, cut, paste, delete)
-- **`flux::Theme`** - Color scheme management
-- **`flux::IconProvider`** - File type icon mapping
-- **`flux::Renderer`** - Reference ncurses renderer implementation
+
+The standalone `fx` application demonstrates how to use these components with Notcurses, but you're free to build your own interface using any framework.
 
 ### Example Integration
 
 ```cpp
 #include <flux/core/browser.h>
 #include <flux/core/file_clipboard.h>
-#include <flux/ui/theme.h>
-#include <flux/ui/icon_provider.h>
 
 // Create core components
 flux::Browser browser(".");
 flux::FileClipboard clipboard;
-flux::Theme theme = flux::Theme::nord();
-flux::IconProvider icons;
 
-// In your render loop
+// In your application loop
 const auto& entries = browser.getCurrentEntries();
 int selected = browser.getSelectedIndex();
 
 for (size_t i = 0; i < entries.size(); ++i) {
     const auto& entry = entries[i];
-
-    // Get visual elements
-    std::string icon = icons.getIcon(entry);
-    Color color = theme.getColorForEntry(entry);
     bool is_selected = (i == selected);
 
-    // Render with your framework
-    yourFramework.drawLine(i, icon, entry.name, color, is_selected);
+    // Render with your framework (Qt, GTK, ImGui, etc.)
+    yourFramework.drawItem(entry.name, entry.is_directory, is_selected);
 }
 
 // Handle navigation
@@ -217,36 +215,44 @@ void handleKey(int key) {
 }
 ```
 
-### Integration Notes
+### API Design Principles
 
-The Flux API is designed to be portable across different UI frameworks:
+The Flux API is designed to be portable:
 
-- **Core logic** is independent of rendering libraries
-- **No assumptions** about event loops or window management
-- **Minimal dependencies** - only C++ standard library for core components
-- **Your UI, your rules** - Use Flux components however fits your architecture
+- **Framework agnostic** - Core logic works with any UI framework
+- **No rendering assumptions** - You control how files are displayed
+- **Minimal dependencies** - Only C++ standard library for core components
+- **Your UI, your rules** - Integrate however fits your architecture
 
-For a complete working example using ncurses, see the `fx/` directory which contains the standalone file browser implementation.
+Potential use cases:
+
+- Build a Qt or GTK file manager
+- Add file browsing to an ImGui application
+- Create a custom TUI with your preferred library
+- Integrate into game engines or media applications
+- Build web-based file managers with the core logic
 
 ## 🏗️ Project Structure
 
 ```
 flux/
 ├── include/flux/          # Public API headers
-│   ├── core/             # Framework-agnostic core logic
-│   │   ├── browser.h     # Directory browsing and navigation
-│   │   └── file_clipboard.h # File operations (copy/paste/delete)
-│   └── ui/               # UI components and utilities
-│       ├── renderer.h    # Reference ncurses renderer
-│       ├── theme.h       # Theme system
-│       └── icon_provider.h # File type icons
-├── src/                  # Implementation
-│   ├── core/
-│   └── ui/
-├── fx/                   # Standalone file browser application
+│   └── core/             # Framework-agnostic core logic
+│       ├── browser.h     # Directory browsing and navigation
+│       └── file_clipboard.h # File operations (copy/paste/delete)
+├── src/                  # Core implementation
+│   └── core/
+├── fx/                   # Standalone file browser (Notcurses)
 │   ├── main.cpp
 │   ├── config/           # Default config and themes
 │   ├── include/          # Application-specific headers
+│   │   ├── ui/           # Notcurses UI components
+│   │   │   ├── renderer.h
+│   │   │   ├── theme.h
+│   │   │   └── icon_provider.h
+│   │   ├── theme_loader.h
+│   │   ├── config_loader.h
+│   │   └── file_opener.h
 │   └── src/              # Application implementations
 └── docs/                 # Documentation
 ```
@@ -272,9 +278,9 @@ sudo make install
 Flux is built on these core principles:
 
 1. **Performance First** - C++ speed with optimized algorithms
-2. **Beautiful by Default** - Gorgeous themes and icons out of the box
+2. **Beautiful by Default** - Gorgeous themes and rich terminal graphics
 3. **Modular Architecture** - Clean separation of concerns
-4. **Framework Agnostic** - Core logic works anywhere
+4. **Framework Agnostic Core** - Build any interface on top
 5. **Zero Config** - Works great immediately, customize if you want
 6. **Keyboard Driven** - Vim-like efficiency for power users
 
@@ -288,6 +294,7 @@ Flux is built on these core principles:
 - [x] Theme system with customization
 - [x] Nerd Font icon support
 - [x] Basic file operations (copy, paste, delete, rename, mkdir)
+- [x] Notcurses integration with true color support
 
 ### Phase 2: Enhanced Operations (Current)
 
@@ -295,6 +302,7 @@ Flux is built on these core principles:
 - [ ] Batch operations
 - [ ] Extended configuration options
 - [ ] Improved error handling and user feedback
+- [ ] Custom file handlers
 
 ### Phase 3: Power Features
 
@@ -309,8 +317,16 @@ Flux is built on these core principles:
 - [ ] Tabs/split panes
 - [ ] Bulk rename with patterns
 - [ ] Trash/recycle bin support
-- [ ] Custom command execution
-- [ ] Extended API for plugin-like functionality
+- [ ] Plugin system for extensibility
+- [ ] Extended API documentation
+
+## Technology Stack
+
+- **Language**: C++20
+- **UI Library**: Notcurses (for standalone `fx`)
+- **Build System**: CMake
+- **Configuration**: TOML
+- **Platform Support**: Linux, macOS, Windows (via MSYS2)
 
 ## Contributing
 
@@ -333,6 +349,7 @@ MIT License - see LICENSE file for details
 ## Acknowledgments
 
 - Inspired by [ranger](https://github.com/ranger/ranger), [lf](https://github.com/gokcehan/lf), and [nnn](https://github.com/jarun/nnn)
+- Powered by [Notcurses](https://github.com/dankamongmen/notcurses) for beautiful terminal graphics
 - Icons provided by [Nerd Fonts](https://www.nerdfonts.com/)
 - TOML parsing with [tomlplusplus](https://github.com/marzer/tomlplusplus)
 

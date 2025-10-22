@@ -30,94 +30,31 @@ if(WIN32)
 endif()
 
 # ============================================
-# Find ncurses/ncursesw (for core library)
+# Find Notcurses (Required for all builds)
 # ============================================
-set(DEPS_DIR ${PROJECT_SOURCE_DIR}/deps)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(NOTCURSES REQUIRED notcurses)
 
-if(WIN32)
-    # Windows: Use PDCursesMod for the core flux library
-    set(PDCURSESMOD_DIR ${DEPS_DIR}/PDCursesMod/wincon)
-
-    if(EXISTS "${PDCURSESMOD_DIR}/pdcurses.lib")
-        message(STATUS "Using locally built PDCursesMod from ${PDCURSESMOD_DIR}")
-
-        add_library(pdcursesmod STATIC IMPORTED)
-        set_target_properties(pdcursesmod PROPERTIES
-            IMPORTED_LOCATION "${PDCURSESMOD_DIR}/pdcurses.lib"
-            INTERFACE_INCLUDE_DIRECTORIES "${DEPS_DIR}/PDCursesMod"
+if(NOT NOTCURSES_FOUND)
+    if(WIN32)
+        message(FATAL_ERROR
+            "Notcurses library not found.\n"
+            "Install via MSYS2: pacman -S mingw-w64-x86_64-notcurses\n"
+            "Make sure you're building in MSYS2 MinGW64 environment."
         )
-
-        set(CURSES_LIBRARIES pdcursesmod)
-        set(CURSES_INCLUDE_DIRS "${DEPS_DIR}/PDCursesMod")
-        message(STATUS "PDCursesMod supports UTF-8 via VT mode")
     else()
-        message(WARNING "PDCursesMod not found at ${PDCURSESMOD_DIR}.")
-        message(WARNING "Using system ncurses from MSYS2 as fallback")
-
-        # Try to find ncurses via pkg-config in MSYS2
-        find_package(PkgConfig REQUIRED)
-        pkg_check_modules(NCURSES REQUIRED ncursesw)
-
-        set(CURSES_LIBRARIES ${NCURSES_LIBRARIES})
-        set(CURSES_INCLUDE_DIRS ${NCURSES_INCLUDE_DIRS})
-    endif()
-
-elseif(ANDROID)
-    # Android: Try ncursesw first, fall back to ncurses
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(NCURSESW ncursesw)
-
-    if(NCURSESW_FOUND)
-        message(STATUS "Found ncursesw for Android")
-        set(CURSES_LIBRARIES ${NCURSESW_LIBRARIES})
-        set(CURSES_INCLUDE_DIRS ${NCURSESW_INCLUDE_DIRS})
-        set(CURSES_LINK_LIBRARIES ${NCURSESW_LINK_LIBRARIES})
-    else()
-        message(STATUS "ncursesw not found, falling back to ncurses")
-        pkg_check_modules(NCURSES REQUIRED ncurses)
-        set(CURSES_LIBRARIES ${NCURSES_LIBRARIES})
-        set(CURSES_INCLUDE_DIRS ${NCURSES_INCLUDE_DIRS})
-        set(CURSES_LINK_LIBRARIES ${NCURSES_LINK_LIBRARIES})
-    endif()
-
-else()
-    # Linux/macOS: Prefer ncursesw over ncurses
-    find_package(PkgConfig)
-
-    if(PkgConfig_FOUND)
-        # Try pkg-config first for ncursesw
-        pkg_check_modules(NCURSESW ncursesw)
-
-        if(NCURSESW_FOUND)
-            message(STATUS "Found ncursesw via pkg-config")
-            set(CURSES_LIBRARIES ${NCURSESW_LIBRARIES})
-            set(CURSES_INCLUDE_DIRS ${NCURSESW_INCLUDE_DIRS})
-            set(CURSES_LINK_FLAGS ${NCURSESW_LDFLAGS})
-        endif()
-    endif()
-
-    # If pkg-config didn't work, try FindCurses with wide character preference
-    if(NOT NCURSESW_FOUND)
-        set(CURSES_NEED_WIDE TRUE)
-        find_package(Curses REQUIRED)
-
-        # Verify we got wide character support
-        if(CURSES_HAVE_NCURSESW_NCURSES_H OR CURSES_HAVE_NCURSESW_H)
-            message(STATUS "Found ncursesw via FindCurses")
-        elseif(CURSES_HAVE_NCURSES_NCURSES_H OR CURSES_HAVE_NCURSES_H)
-            message(WARNING "Only found ncurses (not ncursesw). Unicode icons may not render correctly.")
-            message(WARNING "Install ncursesw: apt-get install libncursesw5-dev (Debian/Ubuntu)")
-        else()
-            message(STATUS "Found curses library: ${CURSES_LIBRARIES}")
-        endif()
-
-        set(CURSES_LIBRARIES ${CURSES_LIBRARIES})
-        set(CURSES_INCLUDE_DIRS ${CURSES_INCLUDE_DIR})
+        message(FATAL_ERROR
+            "Notcurses library not found.\n"
+            "Install on Ubuntu/Debian: sudo apt-get install libnotcurses-dev"
+        )
     endif()
 endif()
 
+message(STATUS "Found Notcurses: ${NOTCURSES_LIBRARIES}")
+message(STATUS "Notcurses include dirs: ${NOTCURSES_INCLUDE_DIRS}")
+
 # ============================================
-# Flux Library (Core + UI)
+# Flux Library (Core)
 # ============================================
 
 set(FLUX_CORE_SOURCES
@@ -153,22 +90,11 @@ target_include_directories(flux
     $<INSTALL_INTERFACE:include>
     PRIVATE
     ${PROJECT_SOURCE_DIR}/src
-    ${CURSES_INCLUDE_DIRS}
-)
-
-target_link_libraries(flux
-    PUBLIC
-    ${CURSES_LIBRARIES}
 )
 
 # Windows-specific: link winmm for beep()
 if(WIN32)
     target_link_libraries(flux PUBLIC winmm)
-endif()
-
-# Android-specific
-if(ANDROID AND CURSES_LINK_LIBRARIES)
-    target_link_libraries(flux PUBLIC ${CURSES_LINK_LIBRARIES})
 endif()
 
 # Compiler warnings
@@ -189,32 +115,10 @@ else()
 endif()
 
 # ============================================
-# Standalone Binary (fx) - NOW USES NOTCURSES
+# Standalone Binary (fx) - Uses Notcurses
 # ============================================
 
 if(BUILD_STANDALONE)
-    # Find Notcurses for standalone binary (ALL platforms including Windows)
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(NOTCURSES notcurses)
-
-    if(NOT NOTCURSES_FOUND)
-        if(WIN32)
-            message(FATAL_ERROR
-                "Notcurses library not found.\n"
-                "Install via MSYS2: pacman -S mingw-w64-x86_64-notcurses\n"
-                "Make sure you're building in MSYS2 MinGW64 environment."
-            )
-        else()
-            message(FATAL_ERROR
-                "Notcurses library not found.\n"
-                "Install on Ubuntu/Debian: sudo apt-get install libnotcurses-dev"
-            )
-        endif()
-    endif()
-
-    message(STATUS "Found Notcurses: ${NOTCURSES_LIBRARIES}")
-    message(STATUS "Notcurses include dirs: ${NOTCURSES_INCLUDE_DIRS}")
-
     set(STANDALONE_SOURCES
         fx/main.cpp
         fx/src/theme_loader.cpp
@@ -238,7 +142,6 @@ if(BUILD_STANDALONE)
     target_include_directories(fx PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/fx
-        ${CURSES_INCLUDE_DIRS}
         ${NOTCURSES_INCLUDE_DIRS}
     )
 
@@ -251,15 +154,6 @@ if(BUILD_STANDALONE)
     if(WIN32)
         # Link additional Windows libraries
         target_link_libraries(fx PRIVATE winmm)
-
-        # If PDCursesMod is being used, add its definitions
-        if(EXISTS "${PDCURSESMOD_DIR}/pdcurses.lib")
-            target_compile_definitions(fx PRIVATE
-                PDC_STATIC
-                PDC_WIDE
-                PDC_FORCE_UTF8
-            )
-        endif()
 
         # If using MSVC, ensure static runtime
         if(MSVC)
@@ -312,7 +206,7 @@ if(BUILD_STANDALONE)
 endif()
 
 # ============================================
-# Installation (Only if enabled and standalone build)
+# Installation (Only if enabled)
 # ============================================
 
 if(FLUX_INSTALL)
@@ -375,17 +269,8 @@ message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "Compiler: ${CMAKE_CXX_COMPILER_ID}")
 message(STATUS "Platform: ${CMAKE_SYSTEM_NAME}")
 message(STATUS "")
-message(STATUS "Curses library: ${CURSES_LIBRARIES}")
-if(NCURSESW_FOUND OR CURSES_HAVE_NCURSESW_H OR CURSES_HAVE_NCURSESW_NCURSES_H)
-    message(STATUS "Wide character support: YES (ncursesw)")
-else()
-    message(STATUS "Wide character support: UNKNOWN (verify with ldd)")
-endif()
-
-if(BUILD_STANDALONE AND NOTCURSES_FOUND)
-    message(STATUS "Notcurses: ${NOTCURSES_LIBRARIES}")
-endif()
-
+message(STATUS "UI Library: Notcurses ${NOTCURSES_VERSION}")
+message(STATUS "Notcurses libraries: ${NOTCURSES_LIBRARIES}")
 message(STATUS "")
 message(STATUS "Build options:")
 message(STATUS "        Standalone binary (fx): ${BUILD_STANDALONE}")

@@ -507,6 +507,11 @@ int main(int argc, char *argv[]) {
                                  (theme.background >> 8) & 0xFF,
                                  theme.background & 0xFF);
           ncplane_set_base(stdplane, " ", 0, channels);
+
+          if (!fx::ConfigLoader::save_theme(selected_theme->name)) {
+
+            std::cerr << "[fx] Warning: Could not save theme to config\n";
+          }
         }
 
         // Refresh display
@@ -567,7 +572,7 @@ void openFileWithHandler(const std::string &filePath,
 
   if (!result.success) {
     // Ensure terminal is in a clean state before showing error
-    if (!isendwin()) {
+    if (g_nc != nullptr) {
       suspendTerminal();
     }
 

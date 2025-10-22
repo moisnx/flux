@@ -2,6 +2,7 @@
 
 #include "../vendor/toml.hpp"
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -55,8 +56,6 @@ public:
     // 1. Check local development directory
     fs::path local_config = fs::current_path() / "config";
     if (fs::exists(local_config) && fs::is_directory(local_config)) {
-      // std::cout << "[fx] Using local config directory: " << local_config
-      //           << "\n";
       return local_config;
     }
 
@@ -65,8 +64,6 @@ public:
     if (config_dir) {
       fs::path user_config = *config_dir / "fx";
       if (fs::exists(user_config) && fs::is_directory(user_config)) {
-        // std::cout << "[fx] Using user config directory: " << user_config
-        //           << "\n";
         return user_config;
       }
     }
@@ -116,7 +113,6 @@ public:
       return cfg;
     }
 
-    // std::cout << "[fx] Loading config from: " << *config_path << "\n";
     return load_from_file(*config_path);
   }
 
@@ -241,6 +237,119 @@ public:
     }
   }
 
+  // Save a specific key-value pair to config.toml
+  static bool save_value(const std::string &section, const std::string &key,
+                         const std::string &value) {
+    auto config_path = find_config_file();
+    if (!config_path) {
+      std::cerr << "[fx] No config file found, cannot save\n";
+      return false;
+    }
+
+    try {
+      auto data = toml::parse_file(config_path->string());
+
+      // Navigate to section and set value
+      if (auto section_table = data[section].as_table()) {
+        section_table->insert_or_assign(key, value);
+      } else {
+        // Create section if it doesn't exist
+        auto new_table = toml::table{};
+        new_table.insert_or_assign(key, value);
+        data.insert_or_assign(section, new_table);
+      }
+
+      // Write back to file
+      std::ofstream file(*config_path);
+      if (!file) {
+        std::cerr << "[fx] Failed to open config file for writing\n";
+        return false;
+      }
+
+      file << data;
+      return true;
+
+    } catch (const std::exception &e) {
+      std::cerr << "[fx] Error saving config: " << e.what() << "\n";
+      return false;
+    }
+  }
+
+  // Save integer value
+  static bool save_value(const std::string &section, const std::string &key,
+                         int value) {
+    auto config_path = find_config_file();
+    if (!config_path) {
+      std::cerr << "[fx] No config file found, cannot save\n";
+      return false;
+    }
+
+    try {
+      auto data = toml::parse_file(config_path->string());
+
+      if (auto section_table = data[section].as_table()) {
+        section_table->insert_or_assign(key, value);
+      } else {
+        auto new_table = toml::table{};
+        new_table.insert_or_assign(key, value);
+        data.insert_or_assign(section, new_table);
+      }
+
+      std::ofstream file(*config_path);
+      if (!file) {
+        std::cerr << "[fx] Failed to open config file for writing\n";
+        return false;
+      }
+
+      file << data;
+      return true;
+
+    } catch (const std::exception &e) {
+      std::cerr << "[fx] Error saving config: " << e.what() << "\n";
+      return false;
+    }
+  }
+
+  // Save boolean value
+  static bool save_value(const std::string &section, const std::string &key,
+                         bool value) {
+    auto config_path = find_config_file();
+    if (!config_path) {
+      std::cerr << "[fx] No config file found, cannot save\n";
+      return false;
+    }
+
+    try {
+      auto data = toml::parse_file(config_path->string());
+
+      if (auto section_table = data[section].as_table()) {
+        section_table->insert_or_assign(key, value);
+      } else {
+        auto new_table = toml::table{};
+        new_table.insert_or_assign(key, value);
+        data.insert_or_assign(section, new_table);
+      }
+
+      std::ofstream file(*config_path);
+      if (!file) {
+        std::cerr << "[fx] Failed to open config file for writing\n";
+        return false;
+      }
+
+      file << data;
+      return true;
+
+    } catch (const std::exception &e) {
+      std::cerr << "[fx] Error saving config: " << e.what() << "\n";
+      return false;
+    }
+  }
+
+  // Convenience method to save the theme
+  static bool save_theme(const std::string &theme_name) {
+    return save_value("appearance", "theme", theme_name);
+  }
+
   // Initialize config structure in a directory
   static bool initialize_config(const fs::path &root_path,
                                 bool copy_system_themes = true) {
@@ -324,9 +433,7 @@ private:
     std::vector<fs::path> system_theme_paths = {"/usr/share/fx/themes",
                                                 "/usr/local/share/fx/themes"};
 
-// Also check relative to executable for portable installations
 #ifdef _WIN32
-    // Windows: check program files
     if (const char *program_files = std::getenv("ProgramFiles")) {
       system_theme_paths.push_back(fs::path(program_files) / "fx" / "themes");
     }
@@ -342,7 +449,6 @@ private:
                 entry.path().extension() == ".toml") {
               fs::path dest = user_themes_dir / entry.path().filename();
 
-              // Don't overwrite existing themes
               if (!fs::exists(dest)) {
                 fs::copy_file(entry.path(), dest);
                 std::cout << "[fx]   Copied: " << entry.path().filename()
@@ -355,26 +461,23 @@ private:
                     << "\n";
         }
 
-        break; // Use first valid system path
+        break;
       }
     }
   }
 
   static std::optional<fs::path> get_platform_config_directory() {
 #ifdef _WIN32
-    // Windows: %APPDATA%
     const char *appdata = std::getenv("APPDATA");
     if (appdata) {
       return fs::path(appdata);
     }
 #elif defined(__APPLE__)
-    // macOS: ~/Library/Application Support
     const char *home = std::getenv("HOME");
     if (home) {
       return fs::path(home) / "Library" / "Application Support";
     }
 #else
-    // Linux/Unix: ~/.config or $XDG_CONFIG_HOME
     const char *xdg_config = std::getenv("XDG_CONFIG_HOME");
     if (xdg_config) {
       return fs::path(xdg_config);
