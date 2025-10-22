@@ -153,7 +153,7 @@ void InputPrompt::renderModal(const std::string &prompt,
   box(modal_win, 0, 0);
 
   if (g_input_theme && has_colors()) {
-    wattroff(modal_win, COLOR_PAIR(g_input_theme->ui_border));
+    wattroff(modal_win, COLOR_PAIR(g_input_theme->background));
   }
 
   // Draw title bar with accent color

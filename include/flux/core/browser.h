@@ -44,6 +44,7 @@ public:
   void selectPrevious();
   void selectFirst();
   void selectLast();
+  void selectByIndex(size_t index) { selected_index_ = index; }
   void pageDown(size_t page_size);
   void pageUp(size_t page_size);
 

@@ -1,13 +1,14 @@
 #include "include/file_opener.hpp"
 #include <algorithm>
 #include <fcntl.h>
-#include <iostream>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <shellapi.h>
 #include <windows.h>
 #else
+#include <errno.h>
+#include <poll.h>
 #include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -176,34 +177,78 @@ void FileOpener::clearAllowedCommands() { allowed_commands_.clear(); }
 bool FileOpener::executeUnix(const std::vector<std::string> &parts,
                              const std::filesystem::path &file_path,
                              bool wait) {
-  // Suspend terminal before launching
   if (suspend_callback_)
     suspend_callback_();
+
+#ifndef _WIN32
+  pid_t parent_pgid = getpgrp();
+  int tty_fd = -1;
+
+  if (isatty(STDIN_FILENO)) {
+    tty_fd = open("/dev/tty", O_RDWR);
+  }
+#endif
 
   pid_t pid = fork();
 
   if (pid < 0) {
+#ifndef _WIN32
+    if (tty_fd >= 0)
+      close(tty_fd);
+#endif
     if (resume_callback_)
       resume_callback_();
     return false;
   }
 
   if (pid == 0) {
-    // Child process - redirect stdout/stderr to prevent terminal corruption
-    if (!wait) {
-      // For non-blocking processes, redirect to /dev/null
-      int devnull = open("/dev/null", O_WRONLY);
-      if (devnull != -1) {
-        dup2(devnull, STDOUT_FILENO);
-        dup2(devnull, STDERR_FILENO);
-        close(devnull);
+    // Child process
+
+    if (wait) {
+#ifndef _WIN32
+      if (tty_fd >= 0) {
+        // Create new process group
+        setpgid(0, 0);
+
+        // Become foreground process
+        tcsetpgrp(tty_fd, getpid());
+
+        close(tty_fd);
       }
 
-      // Detach from terminal for GUI apps
+      // Reset ALL signal handlers to defaults
+      signal(SIGINT, SIG_DFL);
+      signal(SIGQUIT, SIG_DFL);
+      signal(SIGTSTP, SIG_DFL);
+      signal(SIGCONT, SIG_DFL);
+      signal(SIGWINCH, SIG_DFL);
+      signal(SIGTTIN, SIG_DFL);
+      signal(SIGTTOU, SIG_DFL);
+
+      // CRITICAL: Unblock all signals for the child
+      sigset_t mask;
+      sigemptyset(&mask);
+      sigprocmask(SIG_SETMASK, &mask, nullptr);
+#endif
+    } else {
+      // GUI apps - fully detach
+#ifndef _WIN32
+      if (tty_fd >= 0)
+        close(tty_fd);
       setsid();
+
+      int devnull = open("/dev/null", O_RDWR);
+      if (devnull != -1) {
+        dup2(devnull, STDIN_FILENO);
+        dup2(devnull, STDOUT_FILENO);
+        dup2(devnull, STDERR_FILENO);
+        if (devnull > 2)
+          close(devnull);
+      }
+#endif
     }
 
-    // Build argument list
+    // Build and execute
     std::vector<const char *> args;
     args.push_back(parts[0].c_str());
     for (size_t i = 1; i < parts.size(); ++i)
@@ -213,17 +258,61 @@ bool FileOpener::executeUnix(const std::vector<std::string> &parts,
     args.push_back(path_str.c_str());
     args.push_back(nullptr);
 
-    // Execute command
     execvp(args[0], const_cast<char *const *>(args.data()));
-
-    // If execvp fails, exit immediately
     _exit(127);
   }
 
   // Parent process
   if (wait) {
+#ifndef _WIN32
+    if (tty_fd >= 0) {
+      // Set child as its own process group
+      setpgid(pid, pid);
+
+      // Make child foreground
+      tcsetpgrp(tty_fd, pid);
+    }
+
+    // CHANGE: Use SIG_IGN instead of blocking
+    // Save old handlers and set signals to ignore (not block!)
+    struct sigaction old_winch, old_tstp, old_cont, old_ttin, old_ttou;
+    struct sigaction ignore_action;
+    ignore_action.sa_handler = SIG_IGN;
+    sigemptyset(&ignore_action.sa_mask);
+    ignore_action.sa_flags = 0;
+
+    sigaction(SIGWINCH, &ignore_action, &old_winch);
+    sigaction(SIGTSTP, &ignore_action, &old_tstp);
+    sigaction(SIGCONT, &ignore_action, &old_cont);
+    sigaction(SIGTTIN, &ignore_action, &old_ttin);
+    sigaction(SIGTTOU, &ignore_action, &old_ttou);
+#endif
+
     int status;
-    pid_t result = waitpid(pid, &status, 0);
+    pid_t result;
+
+    // Wait for child
+    do {
+      result = waitpid(pid, &status, 0);
+    } while (result == -1 && errno == EINTR);
+
+#ifndef _WIN32
+    // Take back terminal control
+    if (tty_fd >= 0) {
+      // usleep(\1); // 20ms
+      tcsetpgrp(tty_fd, parent_pgid);
+      close(tty_fd);
+    }
+
+    // usleep(\1); // 30ms
+
+    // Restore old signal handlers
+    sigaction(SIGWINCH, &old_winch, nullptr);
+    sigaction(SIGTSTP, &old_tstp, nullptr);
+    sigaction(SIGCONT, &old_cont, nullptr);
+    sigaction(SIGTTIN, &old_ttin, nullptr);
+    sigaction(SIGTTOU, &old_ttou, nullptr);
+#endif
 
     if (resume_callback_)
       resume_callback_();
@@ -232,23 +321,21 @@ bool FileOpener::executeUnix(const std::vector<std::string> &parts,
       return false;
     }
 
-    // Check if process exited normally
     if (WIFEXITED(status)) {
-      int exit_code = WEXITSTATUS(status);
-      return exit_code == 0;
-    }
-
-    // Process was killed by signal
-    if (WIFSIGNALED(status)) {
-      return false;
+      return WEXITSTATUS(status) == 0;
     }
 
     return false;
+  } else {
+    // Non-blocking
+#ifndef _WIN32
+    if (tty_fd >= 0)
+      close(tty_fd);
+#endif
+    // usleep(\1);
+    if (resume_callback_)
+      resume_callback_();
   }
-
-  // Non-blocking: resume immediately
-  if (resume_callback_)
-    resume_callback_();
 
   return true;
 }
@@ -418,7 +505,7 @@ FileOpener::openWithDefault(const std::string &file_path) {
   }
 
   // Small delay to let xdg-open spawn its child
-  usleep(100000); // 100ms
+  // usleep(\1); // 100ms
 
   if (resume_callback_)
     resume_callback_();

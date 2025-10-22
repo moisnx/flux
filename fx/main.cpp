@@ -3,13 +3,13 @@
 #include "include/input_prompt.hpp"
 #include "include/theme_loader.hpp"
 
-#include <algorithm>
+// #include <algorithm>
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
 #include <flux.h>
 #include <iostream>
-#include <locale>
+// #include <locale>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -73,21 +73,47 @@ void printUsage(const char *program_name) {
 }
 
 void suspendTerminal() {
+#ifndef _WIN32
+  // Use SIG_IGN instead of blocking - better for signal propagation
+  struct sigaction ignore_action;
+  ignore_action.sa_handler = SIG_IGN;
+  sigemptyset(&ignore_action.sa_mask);
+  ignore_action.sa_flags = 0;
+
+  // These will be restored when we resume
+  sigaction(SIGWINCH, &ignore_action, nullptr);
+  sigaction(SIGTSTP, &ignore_action, nullptr);
+  sigaction(SIGCONT, &ignore_action, nullptr);
+  sigaction(SIGTTIN, &ignore_action, nullptr);
+  sigaction(SIGTTOU, &ignore_action, nullptr);
+#endif
+
   // Save terminal mode
   def_prog_mode();
 
-  // Clean up ncurses gracefully
+  // Clean up ncurses gracefully with neutral colors
   if (!isendwin()) {
+    attrset(A_NORMAL);
+    bkgd(COLOR_PAIR(0));
+    clear();
+    refresh();
     endwin();
   }
 
-  std::cout << "\033[0m" << std::flush;   // Reset attributes
-  std::cout << "\033[?25h" << std::flush; // Show cursor
+  // Ensure clean terminal state
+  std::cout << "\033[0m"     // Reset all attributes
+            << "\033[39;49m" // Default fg/bg colors
+            << "\033[2J"     // Clear screen
+            << "\033[H"      // Home cursor
+            << "\033[?25h"   // Show cursor
+            << std::flush;
+
+  // usleep(\1); // 5ms
 }
 
 void resumeTerminal() {
-  // Minimal delay - just enough for the process to fully exit
-  usleep(50000);
+  // Gently clear the screen
+  std::cout << "\033[2J\033[H" << std::flush;
 
   // Reinitialize ncurses
   refresh();
@@ -103,26 +129,28 @@ void resumeTerminal() {
   // Clear any pending input
   flushinp();
 
-  // Reapply colors and theme
+  // Reapply colors and theme (OPTIMIZED - no file I/O)
   if (has_colors() && g_theme_manager) {
     start_color();
     use_default_colors();
 
-    auto theme_path = fx::ThemeLoader::findThemeFile(g_theme_name);
-    if (theme_path) {
-      auto def = fx::ThemeLoader::loadFromTOML(*theme_path);
-      g_theme = g_theme_manager->applyThemeDefinition(def);
-
-      if (def.background != "transparent" && def.background != "default" &&
-          !def.background.empty()) {
-        bkgd(COLOR_PAIR(g_theme.background));
-      }
+    // Just reapply the cached theme directly - no disk access!
+    if (g_theme.background > 0) {
+      bkgd(COLOR_PAIR(g_theme.background));
     }
   }
 
+  // Force a clean redraw
   clearok(stdscr, TRUE);
   clear();
   refresh();
+
+#ifndef _WIN32
+  // Unblock signals
+  sigset_t mask;
+  sigemptyset(&mask);
+  sigprocmask(SIG_SETMASK, &mask, nullptr);
+#endif
 }
 
 int main(int argc, char *argv[]) {
@@ -234,11 +262,11 @@ int main(int argc, char *argv[]) {
     std::cerr << "[fx] Theme '" << theme_name << "' not found, using default\n";
     theme = theme_manager.applyThemeDefinition(
         flux::ThemeManager::getDefaultThemeDef());
-    fx::InputPrompt::setTheme(theme);
     g_theme = theme;
     bkgd(COLOR_PAIR(theme.background));
   }
 
+  fx::InputPrompt::setTheme(theme);
   renderer.setTheme(theme);
   renderer.setIconStyle(use_icons ? IconStyle::AUTO : IconStyle::ASCII);
 
@@ -306,9 +334,21 @@ int main(int argc, char *argv[]) {
         browser.navigateInto(browser.getSelectedIndex());
       } else {
         const std::string selected_file = browser.getSelectedPath()->string();
+
+        // Save the current scroll position
+        size_t saved_index = browser.getSelectedIndex();
+
         openFileWithHandler(selected_file, config);
-        // Refresh browser and renderer after returning
+
+        // After returning, force the browser to recalculate scroll
+        browser.updateScroll(renderer.getViewportHeight());
+        // Force a complete redraw
+        clearok(stdscr, TRUE);
+        clear();
+
+        // Refresh browser and renderer
         browser.refresh();
+        browser.selectByIndex(saved_index);
         renderer.setTheme(g_theme);
       }
       break;
@@ -321,15 +361,19 @@ int main(int argc, char *argv[]) {
         if (browser.createFile(*name)) {
           // Success - file created and selected
         } else {
-          // Show error (browser already has error set)
-          std::string error = browser.getErrorMessage();
-          move(LINES - 1, 0);
-          clrtoeol();
-          attron(A_BOLD | COLOR_PAIR(1)); // Assuming color pair 1 is red/error
-          mvprintw(LINES - 1, 0, "Error: %s", error.c_str());
-          attroff(A_BOLD | COLOR_PAIR(1));
-          refresh();
-          napms(2000); // Show error for 2 seconds
+          const std::string selected_file = browser.getSelectedPath()->string();
+          size_t saved_index = browser.getSelectedIndex();
+
+          openFileWithHandler(selected_file, config);
+
+          // Restore position first, then update scroll
+          browser.selectByIndex(saved_index);
+          browser.updateScroll(renderer.getViewportHeight());
+
+          // Clean redraw
+          clearok(stdscr, TRUE);
+          clear();
+          renderer.setTheme(g_theme);
         }
       }
       break;
@@ -372,6 +416,7 @@ int main(int argc, char *argv[]) {
           napms(2000); // Show error for 2 seconds
         }
       }
+      break;
     }
     case 'd': {
 
@@ -476,10 +521,62 @@ void restore_terminal_attributes() {
 #endif
 }
 
+#ifndef _WIN32
+// Add these global variables
+static volatile sig_atomic_t terminal_suspended = 0;
+
+void handle_sigtstp(int sig) {
+  if (!terminal_suspended) {
+    terminal_suspended = 1;
+    suspendTerminal();
+    signal(SIGTSTP, SIG_DFL);
+    raise(SIGTSTP);
+  }
+}
+
+void handle_sigcont(int sig) {
+  signal(SIGTSTP, handle_sigtstp);
+  if (terminal_suspended) {
+    terminal_suspended = 0;
+    resumeTerminal();
+  }
+}
+
+void handle_sigwinch(int sig) {
+  // Only handle resize if we're active
+  if (!terminal_suspended) {
+    endwin();
+    refresh();
+    clearok(stdscr, TRUE);
+  }
+}
+#endif
+
 void setup_signal_handlers() {
 #ifndef _WIN32
+  struct sigaction sa_tstp, sa_cont, sa_winch;
+
+  // Save originals
   sigaction(SIGWINCH, nullptr, &original_sigwinch);
   sigaction(SIGTSTP, nullptr, &original_sigtstp);
   sigaction(SIGCONT, nullptr, &original_sigcont);
+
+  // Setup SIGTSTP handler
+  sa_tstp.sa_handler = handle_sigtstp;
+  sigemptyset(&sa_tstp.sa_mask);
+  sa_tstp.sa_flags = SA_RESTART;
+  sigaction(SIGTSTP, &sa_tstp, nullptr);
+
+  // Setup SIGCONT handler
+  sa_cont.sa_handler = handle_sigcont;
+  sigemptyset(&sa_cont.sa_mask);
+  sa_cont.sa_flags = SA_RESTART;
+  sigaction(SIGCONT, &sa_cont, nullptr);
+
+  // Setup SIGWINCH handler
+  sa_winch.sa_handler = handle_sigwinch;
+  sigemptyset(&sa_winch.sa_mask);
+  sa_winch.sa_flags = SA_RESTART;
+  sigaction(SIGWINCH, &sa_winch, nullptr);
 #endif
 }
