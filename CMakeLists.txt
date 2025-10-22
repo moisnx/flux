@@ -224,6 +224,7 @@ if(BUILD_STANDALONE)
         fx/src/ui/renderer.cpp
         fx/src/ui/icon_provider.cpp
         fx/src/ui/theme.cpp
+        fx/src/ui/theme_selector.cpp
     )
 
     add_executable(fx ${STANDALONE_SOURCES})

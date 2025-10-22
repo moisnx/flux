@@ -24,6 +24,8 @@ struct Theme {
   uint32_t ui_accent;
   uint32_t ui_info;
   uint32_t ui_success;
+
+  bool use_default_bg = false;
 };
 
 // Theme definition - string-based color specifications

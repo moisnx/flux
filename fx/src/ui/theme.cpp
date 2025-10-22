@@ -39,8 +39,10 @@ ThemeManager::ThemeManager() {}
 Theme ThemeManager::applyThemeDefinition(const ThemeDefinition &def) {
   Theme theme;
 
-  // Simply parse hex colors - NO init_pair() calls!
   theme.background = parseHexColor(def.background);
+  theme.use_default_bg =
+      (def.background == "transparent" || def.background == "default" ||
+       def.background.empty());
   theme.foreground = parseHexColor(def.foreground);
   theme.selected = parseHexColor(def.selected);
   theme.directory = parseHexColor(def.directory);

@@ -4,6 +4,7 @@
 #include "include/theme_loader.hpp"
 #include "include/ui/renderer.hpp"
 #include "include/ui/theme.hpp"
+#include "include/ui/theme_selector.hpp"
 
 #include <csignal>
 #include <cstdlib>
@@ -477,6 +478,39 @@ int main(int argc, char *argv[]) {
         if (!browser.removeEntry(browser.getSelectedIndex())) {
           // Handle error
         }
+      }
+    } else if (key == 't' || key == 'T') {
+      // Show theme selector
+      fx::ThemeSelector selector(nc, stdplane);
+      auto selected_theme = selector.show(theme_name);
+
+      if (selected_theme) {
+        // Update global theme name
+        g_theme_name = selected_theme->name;
+        theme_name = selected_theme->name;
+
+        // Apply the new theme
+        theme = theme_manager.applyThemeDefinition(selected_theme->definition);
+        g_theme = theme;
+        fx::InputPrompt::setTheme(theme);
+        renderer.setTheme(theme);
+
+        // Update background
+        if (selected_theme->definition.background != "transparent" &&
+            selected_theme->definition.background != "default" &&
+            !selected_theme->definition.background.empty()) {
+          uint64_t channels = 0;
+          ncchannels_set_fg_rgb8(&channels, (theme.foreground >> 16) & 0xFF,
+                                 (theme.foreground >> 8) & 0xFF,
+                                 theme.foreground & 0xFF);
+          ncchannels_set_bg_rgb8(&channels, (theme.background >> 16) & 0xFF,
+                                 (theme.background >> 8) & 0xFF,
+                                 theme.background & 0xFF);
+          ncplane_set_base(stdplane, " ", 0, channels);
+        }
+
+        // Refresh display
+        browser.updateScroll(renderer.getViewportHeight());
       }
     }
   }

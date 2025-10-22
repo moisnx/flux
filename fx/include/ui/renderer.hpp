@@ -28,6 +28,7 @@ private:
 
   void setColors(uint32_t fg_rgb);
   void setColors(uint32_t fg_rgb, uint32_t bg_rgb);
+  void setColorsDefaultBg(uint32_t fg_rgb);
   void clearToEOL();
   int height_, width_;
 

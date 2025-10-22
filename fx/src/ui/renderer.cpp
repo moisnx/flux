@@ -16,14 +16,15 @@ Renderer::Renderer(notcurses *nc, ncplane *stdplane)
 void Renderer::setTheme(const Theme &theme) {
   theme_ = theme;
 
-  // CRITICAL FIX: Set the base background when theme changes
   uint64_t channels = 0;
-  ncchannels_set_fg_rgb8(&channels, (theme_.foreground >> 16) & 0xFF,
-                         (theme_.foreground >> 8) & 0xFF,
-                         theme_.foreground & 0xFF);
-  ncchannels_set_bg_rgb8(&channels, (theme_.background >> 16) & 0xFF,
-                         (theme_.background >> 8) & 0xFF,
-                         theme_.background & 0xFF);
+  ncchannels_set_fg_rgb(&channels, theme_.foreground);
+
+  if (theme_.use_default_bg) {
+    ncchannels_set_bg_default(&channels);
+  } else {
+    ncchannels_set_bg_rgb(&channels, theme_.background);
+  }
+
   ncplane_set_base(stdplane_, " ", 0, channels);
 }
 
@@ -41,14 +42,19 @@ void Renderer::setColors(uint32_t fg_rgb) {
 
 void Renderer::setColors(uint32_t fg_rgb, uint32_t bg_rgb) {
   uint64_t channels = 0;
-  ncchannels_set_fg_rgb8(&channels,
-                         (fg_rgb >> 16) & 0xFF, // R
-                         (fg_rgb >> 8) & 0xFF,  // G
-                         fg_rgb & 0xFF);        // B
-  ncchannels_set_bg_rgb8(&channels,
-                         (bg_rgb >> 16) & 0xFF, // R
-                         (bg_rgb >> 8) & 0xFF,  // G
-                         bg_rgb & 0xFF);        // B
+  ncchannels_set_fg_rgb(&channels, fg_rgb);
+
+  // Check if background should be transparent (0x000000 with special flag)
+  // We'll use a sentinel value or check the theme definition
+  ncchannels_set_bg_rgb(&channels, bg_rgb);
+
+  ncplane_set_channels(stdplane_, channels);
+}
+
+void Renderer::setColorsDefaultBg(uint32_t fg_rgb) {
+  uint64_t channels = 0;
+  ncchannels_set_fg_rgb(&channels, fg_rgb);
+  ncchannels_set_bg_default(&channels);
   ncplane_set_channels(stdplane_, channels);
 }
 
@@ -114,9 +120,17 @@ void Renderer::renderHeader(const Browser &browser) {
   setColors(theme_.foreground, theme_.status_bar);
   clearToEOL();
 
-  // Path line - use background color here
   ncplane_cursor_move_yx(stdplane_, 1, 0);
-  setColors(theme_.ui_border, theme_.background);
+
+  uint64_t path_channels = 0;
+  ncchannels_set_fg_rgb(&path_channels, theme_.ui_border);
+
+  if (theme_.use_default_bg) {
+    ncchannels_set_bg_default(&path_channels);
+  } else {
+    ncchannels_set_bg_rgb(&path_channels, theme_.background);
+  }
+  ncplane_set_channels(stdplane_, path_channels);
 
   std::string path = browser.getCurrentPath().string();
   int max_path_len = width - 6;
@@ -177,24 +191,48 @@ void Renderer::renderFileList(const Browser &browser) {
       name_color_rgb = theme_.foreground;
     }
 
-    // Selection styling - use theme background when not selected
+    // Selection styling
     if (is_selected) {
       // Selected row: use selection background for entire line
-      setColors(theme_.foreground, theme_.selected);
+      uint64_t sel_channels = 0;
+      ncchannels_set_fg_rgb(&sel_channels, theme_.foreground);
+      ncchannels_set_bg_rgb(&sel_channels, theme_.selected);
+      ncplane_set_channels(stdplane_, sel_channels);
       ncplane_printf(stdplane_, " %s ", icon.c_str());
 
       // Name with semantic color on selection background
-      setColors(name_color_rgb, theme_.selected);
+      ncchannels_set_fg_rgb(&sel_channels, name_color_rgb);
+      ncchannels_set_bg_rgb(&sel_channels, theme_.selected);
+      ncplane_set_channels(stdplane_, sel_channels);
+
       if (use_bold) {
         ncplane_set_styles(stdplane_, NCSTYLE_BOLD);
       }
     } else {
-      // Non-selected: icon in secondary color with theme background
-      setColors(theme_.ui_secondary, theme_.background);
+      // Non-selected: icon in secondary color
+      uint64_t unsel_channels = 0;
+      ncchannels_set_fg_rgb(&unsel_channels, theme_.ui_secondary);
+
+      if (theme_.use_default_bg) {
+        ncchannels_set_bg_default(&unsel_channels); // ← FIX 1
+      } else {
+        ncchannels_set_bg_rgb(&unsel_channels, theme_.background);
+      }
+
+      ncplane_set_channels(stdplane_, unsel_channels);
       ncplane_printf(stdplane_, " %s ", icon.c_str());
 
-      // Name in semantic color with theme background
-      setColors(name_color_rgb, theme_.background);
+      // Name in semantic color
+      ncchannels_set_fg_rgb(&unsel_channels, name_color_rgb);
+
+      if (theme_.use_default_bg) {
+        ncchannels_set_bg_default(&unsel_channels); // ← FIX 2
+      } else {
+        ncchannels_set_bg_rgb(&unsel_channels, theme_.background);
+      }
+
+      ncplane_set_channels(stdplane_, unsel_channels);
+
       if (use_bold) {
         ncplane_set_styles(stdplane_, NCSTYLE_BOLD);
       }
@@ -209,8 +247,6 @@ void Renderer::renderFileList(const Browser &browser) {
     }
 
     ncplane_putstr(stdplane_, display_name.c_str());
-
-    // Clear all styles after name
     ncplane_set_styles(stdplane_, NCSTYLE_NONE);
 
     // Get current position
@@ -220,25 +256,39 @@ void Renderer::renderFileList(const Browser &browser) {
     int target_x = width - size_width;
 
     // Fill gap with appropriate background
+    uint64_t gap_channels = 0;
     if (is_selected) {
-      // Keep selection background across gap
-      setColors(theme_.foreground, theme_.selected);
-      for (int p = current_x; p < target_x; ++p) {
-        ncplane_putchar(stdplane_, ' ');
-      }
-
-      // Size info on selection background
-      setColors(theme_.ui_secondary, theme_.selected);
+      ncchannels_set_fg_rgb(&gap_channels, theme_.foreground);
+      ncchannels_set_bg_rgb(&gap_channels, theme_.selected);
     } else {
-      // Theme background for gap
-      setColors(theme_.foreground, theme_.background);
-      for (int p = current_x; p < target_x; ++p) {
-        ncplane_putchar(stdplane_, ' ');
-      }
+      ncchannels_set_fg_rgb(&gap_channels, theme_.foreground);
 
-      // Size info in secondary color with theme background
-      setColors(theme_.ui_secondary, theme_.background);
+      if (theme_.use_default_bg) {
+        ncchannels_set_bg_default(&gap_channels); // ← FIX 3
+      } else {
+        ncchannels_set_bg_rgb(&gap_channels, theme_.background);
+      }
     }
+    ncplane_set_channels(stdplane_, gap_channels);
+
+    for (int p = current_x; p < target_x; ++p) {
+      ncplane_putchar(stdplane_, ' ');
+    }
+
+    // Size info
+    uint64_t size_channels = 0;
+    ncchannels_set_fg_rgb(&size_channels, theme_.ui_secondary);
+
+    if (is_selected) {
+      ncchannels_set_bg_rgb(&size_channels, theme_.selected);
+    } else {
+      if (theme_.use_default_bg) {
+        ncchannels_set_bg_default(&size_channels); // ← FIX 4
+      } else {
+        ncchannels_set_bg_rgb(&size_channels, theme_.background);
+      }
+    }
+    ncplane_set_channels(stdplane_, size_channels);
 
     // Print size information
     if (!entry.is_directory && entry.name != "..") {
@@ -251,25 +301,44 @@ void Renderer::renderFileList(const Browser &browser) {
 
     // Final padding for selected items
     if (is_selected) {
-      setColors(theme_.foreground, theme_.selected);
+      uint64_t pad_channels = 0;
+      ncchannels_set_fg_rgb(&pad_channels, theme_.foreground);
+      ncchannels_set_bg_rgb(&pad_channels, theme_.selected);
+      ncplane_set_channels(stdplane_, pad_channels);
       ncplane_putchar(stdplane_, ' ');
     }
 
-    // Clear to end of line with correct background
+    // Clear to end of line
+    uint64_t eol_channels = 0;
+    ncchannels_set_fg_rgb(&eol_channels, theme_.foreground);
+
     if (is_selected) {
-      setColors(theme_.foreground, theme_.selected);
+      ncchannels_set_bg_rgb(&eol_channels, theme_.selected);
     } else {
-      setColors(theme_.foreground, theme_.background);
+      if (theme_.use_default_bg) {
+        ncchannels_set_bg_default(&eol_channels); // ← FIX 5
+      } else {
+        ncchannels_set_bg_rgb(&eol_channels, theme_.background);
+      }
     }
+    ncplane_set_channels(stdplane_, eol_channels);
     clearToEOL();
 
-    // CRITICAL: Reset all styles at end of line
     ncplane_set_styles(stdplane_, NCSTYLE_NONE);
   }
 
-  // Clear remaining viewport with theme background
-  setColors(theme_.foreground, theme_.background);
+  // Clear remaining viewport
+  uint64_t clear_channels = 0;
+  ncchannels_set_fg_rgb(&clear_channels, theme_.foreground);
+
+  if (theme_.use_default_bg) {
+    ncchannels_set_bg_default(&clear_channels); // ← FIX 6
+  } else {
+    ncchannels_set_bg_rgb(&clear_channels, theme_.background);
+  }
+  ncplane_set_channels(stdplane_, clear_channels);
   ncplane_set_styles(stdplane_, NCSTYLE_NONE);
+
   for (int y = start_y + (visible_end - scroll);
        y < static_cast<int>(height) - 2; ++y) {
     ncplane_cursor_move_yx(stdplane_, y, 0);
