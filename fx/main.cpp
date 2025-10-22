@@ -108,18 +108,23 @@ void resumeTerminal() {
     std::string ct = colorterm;
     has_truecolor = (ct == "truecolor" || ct == "24bit");
   }
-  // Also check TERM
-  if (!has_truecolor) {
+
+  // Only set termtype if we're confident it's supported
+  // Let notcurses auto-detect for most terminals
+  const char *termtype = nullptr;
+
+  // Only override for terminals we know support xterm-direct
+  if (has_truecolor) {
     if (const char *term = std::getenv("TERM")) {
       std::string t = term;
-      has_truecolor = (t.find("direct") != std::string::npos ||
-                       t.find("kitty") != std::string::npos ||
-                       t.find("konsole") != std::string::npos);
+      // Only use xterm-direct for known-good terminals
+      if (t.find("kitty") != std::string::npos ||
+          t.find("konsole") != std::string::npos || t == "xterm-direct") {
+        termtype = "xterm-direct";
+      }
+      // For other terminals with truecolor, let notcurses auto-detect
     }
   }
-
-  // Set termtype accordingly
-  const char *termtype = has_truecolor ? "xterm-direct" : nullptr;
 
   // Reinitialize notcurses
   struct notcurses_options opts = {.termtype = termtype,
@@ -240,16 +245,22 @@ int main(int argc, char *argv[]) {
     has_truecolor = (ct == "truecolor" || ct == "24bit");
   }
 
-  if (!has_truecolor) {
+  // Only set termtype if we're confident it's supported
+  // Let notcurses auto-detect for most terminals
+  const char *termtype = nullptr;
+
+  // Only override for terminals we know support xterm-direct
+  if (has_truecolor) {
     if (const char *term = std::getenv("TERM")) {
       std::string t = term;
-      has_truecolor = (t.find("direct") != std::string::npos ||
-                       t.find("kitty") != std::string::npos ||
-                       t.find("konsole") != std::string::npos);
+      // Only use xterm-direct for known-good terminals
+      if (t.find("kitty") != std::string::npos ||
+          t.find("konsole") != std::string::npos || t == "xterm-direct") {
+        termtype = "xterm-direct";
+      }
+      // For other terminals with truecolor, let notcurses auto-detect
     }
   }
-
-  const char *termtype = has_truecolor ? "xterm-direct" : nullptr;
 
   struct notcurses_options opts = {.termtype = termtype,
                                    .loglevel = NCLOGLEVEL_SILENT,
