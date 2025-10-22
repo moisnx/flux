@@ -2,7 +2,7 @@ name = "Tokyo Night"
 
 [colors]
 # #1A1B26
-background = "transparent"
+background = "#1A1B26"
 foreground = "#C0CAF5"
 selected = "#283457"
 directory = "#7AA2F7"

@@ -13,7 +13,19 @@ Renderer::Renderer(notcurses *nc, ncplane *stdplane)
     : nc_(nc), stdplane_(stdplane), viewport_height_(0),
       theme_(createDefaultTheme()), icon_provider_(IconStyle::AUTO) {}
 
-void Renderer::setTheme(const Theme &theme) { theme_ = theme; }
+void Renderer::setTheme(const Theme &theme) {
+  theme_ = theme;
+
+  // CRITICAL FIX: Set the base background when theme changes
+  uint64_t channels = 0;
+  ncchannels_set_fg_rgb8(&channels, (theme_.foreground >> 16) & 0xFF,
+                         (theme_.foreground >> 8) & 0xFF,
+                         theme_.foreground & 0xFF);
+  ncchannels_set_bg_rgb8(&channels, (theme_.background >> 16) & 0xFF,
+                         (theme_.background >> 8) & 0xFF,
+                         theme_.background & 0xFF);
+  ncplane_set_base(stdplane_, " ", 0, channels);
+}
 
 void Renderer::setIconStyle(IconStyle style) {
   icon_provider_ = IconProvider(style);
@@ -21,20 +33,22 @@ void Renderer::setIconStyle(IconStyle style) {
 
 void Renderer::setColors(uint32_t fg_rgb) {
   uint64_t channels = 0;
-  ncchannels_set_fg_rgb8(&channels,
-                         (fg_rgb >> 16) & 0xFF, // R
-                         (fg_rgb >> 8) & 0xFF,  // G
-                         fg_rgb & 0xFF);        // B
+  ncchannels_set_fg_rgb8(&channels, (fg_rgb >> 16) & 0xFF, (fg_rgb >> 8) & 0xFF,
+                         fg_rgb & 0xFF);
   ncchannels_set_bg_default(&channels);
   ncplane_set_channels(stdplane_, channels);
 }
 
 void Renderer::setColors(uint32_t fg_rgb, uint32_t bg_rgb) {
   uint64_t channels = 0;
-  ncchannels_set_fg_rgb8(&channels, (fg_rgb >> 16) & 0xFF, (fg_rgb >> 8) & 0xFF,
-                         fg_rgb & 0xFF);
-  ncchannels_set_bg_rgb8(&channels, (bg_rgb >> 16) & 0xFF, (bg_rgb >> 8) & 0xFF,
-                         bg_rgb & 0xFF);
+  ncchannels_set_fg_rgb8(&channels,
+                         (fg_rgb >> 16) & 0xFF, // R
+                         (fg_rgb >> 8) & 0xFF,  // G
+                         fg_rgb & 0xFF);        // B
+  ncchannels_set_bg_rgb8(&channels,
+                         (bg_rgb >> 16) & 0xFF, // R
+                         (bg_rgb >> 8) & 0xFF,  // G
+                         bg_rgb & 0xFF);        // B
   ncplane_set_channels(stdplane_, channels);
 }
 
@@ -56,8 +70,18 @@ void Renderer::render(const Browser &browser) {
   ncplane_dim_yx(stdplane_, &height, &width);
   viewport_height_ = std::max(1, static_cast<int>(height) - 4);
 
+  // CRITICAL FIX: Erase with proper background color
+  // First set the channels for erasing
+  uint64_t erase_channels = 0;
+  ncchannels_set_fg_rgb8(&erase_channels, (theme_.foreground >> 16) & 0xFF,
+                         (theme_.foreground >> 8) & 0xFF,
+                         theme_.foreground & 0xFF);
+  ncchannels_set_bg_rgb8(&erase_channels, (theme_.background >> 16) & 0xFF,
+                         (theme_.background >> 8) & 0xFF,
+                         theme_.background & 0xFF);
+  ncplane_set_channels(stdplane_, erase_channels);
+
   ncplane_set_styles(stdplane_, NCSTYLE_NONE);
-  setColors(theme_.foreground, theme_.background);
   ncplane_erase(stdplane_);
 
   renderHeader(browser);
@@ -70,7 +94,7 @@ void Renderer::renderHeader(const Browser &browser) {
   unsigned width, height;
   ncplane_dim_yx(stdplane_, &height, &width);
 
-  // Status bar - reuse colors!
+  // Status bar
   setColors(theme_.foreground, theme_.status_bar);
   ncplane_cursor_move_yx(stdplane_, 0, 0);
   ncplane_putstr(stdplane_, " ");
@@ -90,9 +114,9 @@ void Renderer::renderHeader(const Browser &browser) {
   setColors(theme_.foreground, theme_.status_bar);
   clearToEOL();
 
-  // Path line
+  // Path line - use background color here
   ncplane_cursor_move_yx(stdplane_, 1, 0);
-  setColors(theme_.ui_border);
+  setColors(theme_.ui_border, theme_.background);
 
   std::string path = browser.getCurrentPath().string();
   int max_path_len = width - 6;
@@ -153,7 +177,7 @@ void Renderer::renderFileList(const Browser &browser) {
       name_color_rgb = theme_.foreground;
     }
 
-    // Selection styling - FIXED
+    // Selection styling - use theme background when not selected
     if (is_selected) {
       // Selected row: use selection background for entire line
       setColors(theme_.foreground, theme_.selected);
@@ -165,12 +189,12 @@ void Renderer::renderFileList(const Browser &browser) {
         ncplane_set_styles(stdplane_, NCSTYLE_BOLD);
       }
     } else {
-      // Non-selected: icon in secondary color, default background
-      setColors(theme_.ui_secondary);
+      // Non-selected: icon in secondary color with theme background
+      setColors(theme_.ui_secondary, theme_.background);
       ncplane_printf(stdplane_, " %s ", icon.c_str());
 
-      // Name in semantic color with default background
-      setColors(name_color_rgb);
+      // Name in semantic color with theme background
+      setColors(name_color_rgb, theme_.background);
       if (use_bold) {
         ncplane_set_styles(stdplane_, NCSTYLE_BOLD);
       }
@@ -206,14 +230,14 @@ void Renderer::renderFileList(const Browser &browser) {
       // Size info on selection background
       setColors(theme_.ui_secondary, theme_.selected);
     } else {
-      // Default background for gap
-      setColors(theme_.foreground);
+      // Theme background for gap
+      setColors(theme_.foreground, theme_.background);
       for (int p = current_x; p < target_x; ++p) {
         ncplane_putchar(stdplane_, ' ');
       }
 
-      // Size info in secondary color
-      setColors(theme_.ui_secondary);
+      // Size info in secondary color with theme background
+      setColors(theme_.ui_secondary, theme_.background);
     }
 
     // Print size information
@@ -235,7 +259,7 @@ void Renderer::renderFileList(const Browser &browser) {
     if (is_selected) {
       setColors(theme_.foreground, theme_.selected);
     } else {
-      setColors(theme_.foreground);
+      setColors(theme_.foreground, theme_.background);
     }
     clearToEOL();
 
@@ -243,8 +267,8 @@ void Renderer::renderFileList(const Browser &browser) {
     ncplane_set_styles(stdplane_, NCSTYLE_NONE);
   }
 
-  // Clear remaining viewport with default background
-  setColors(theme_.foreground);
+  // Clear remaining viewport with theme background
+  setColors(theme_.foreground, theme_.background);
   ncplane_set_styles(stdplane_, NCSTYLE_NONE);
   for (int y = start_y + (visible_end - scroll);
        y < static_cast<int>(height) - 2; ++y) {
@@ -259,7 +283,7 @@ void Renderer::renderStatus(const Browser &browser) {
   int status_y = height - 2;
 
   // Separator line
-  setColors(theme_.ui_border);
+  setColors(theme_.ui_border, theme_.background);
   ncplane_cursor_move_yx(stdplane_, status_y - 1, 0);
   for (unsigned i = 0; i < width; ++i) {
     ncplane_putstr(stdplane_, "─");
@@ -269,7 +293,7 @@ void Renderer::renderStatus(const Browser &browser) {
   ncplane_cursor_move_yx(stdplane_, status_y, 0);
 
   if (browser.hasError()) {
-    setColors(theme_.ui_error);
+    setColors(theme_.ui_error, theme_.background);
     ncplane_putstr(stdplane_, " ! ");
     ncplane_set_styles(stdplane_, NCSTYLE_BOLD);
     ncplane_putstr(stdplane_, browser.getErrorMessage().c_str());
@@ -328,7 +352,7 @@ void Renderer::renderStatus(const Browser &browser) {
   // Help line
   status_y++;
   ncplane_cursor_move_yx(stdplane_, status_y, 0);
-  setColors(theme_.ui_secondary);
+  setColors(theme_.ui_secondary, theme_.background);
 
   ncplane_putstr(stdplane_, " ");
   ncplane_set_styles(stdplane_, NCSTYLE_BOLD);

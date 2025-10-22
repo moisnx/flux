@@ -91,26 +91,46 @@ void suspendTerminal() {
   sigaction(SIGTTOU, &ignore_action, nullptr);
 #endif
 
-  // Stop notcurses completely
+  // Stop notcurses completely to give terminal to external program
   if (g_nc) {
     notcurses_stop(g_nc);
     g_nc = nullptr;
     g_stdplane = nullptr;
   }
-
-  // Clean terminal output
-  std::cout << "\033[0m"     // Reset all attributes
-            << "\033[39;49m" // Default fg/bg colors
-            << "\033[2J"     // Clear screen
-            << "\033[H"      // Home cursor
-            << "\033[?25h"   // Show cursor
-            << std::flush;
 }
 
 void resumeTerminal() {
-  std::cout << "\033[2J\033[H" << std::flush;
+  // Wait for terminal to settle after external program exits
+  usleep(50000);
 
-  struct notcurses_options opts = {/*...*/};
+  bool has_truecolor = false;
+  if (const char *colorterm = std::getenv("COLORTERM")) {
+    std::string ct = colorterm;
+    has_truecolor = (ct == "truecolor" || ct == "24bit");
+  }
+  // Also check TERM
+  if (!has_truecolor) {
+    if (const char *term = std::getenv("TERM")) {
+      std::string t = term;
+      has_truecolor = (t.find("direct") != std::string::npos ||
+                       t.find("kitty") != std::string::npos ||
+                       t.find("konsole") != std::string::npos);
+    }
+  }
+
+  // Set termtype accordingly
+  const char *termtype = has_truecolor ? "xterm-direct" : nullptr;
+
+  // Reinitialize notcurses
+  struct notcurses_options opts = {.termtype = termtype,
+                                   .loglevel = NCLOGLEVEL_SILENT,
+                                   .margin_t = 0,
+                                   .margin_r = 0,
+                                   .margin_b = 0,
+                                   .margin_l = 0,
+                                   .flags = NCOPTION_SUPPRESS_BANNERS |
+                                            NCOPTION_NO_CLEAR_BITMAPS};
+
   g_nc = notcurses_init(&opts, nullptr);
   if (!g_nc)
     return;
@@ -124,7 +144,6 @@ void resumeTerminal() {
       auto def = fx::ThemeLoader::loadFromTOML(*theme_path);
       g_theme = g_theme_manager->applyThemeDefinition(def);
 
-      // ADD THIS: Reapply background
       if (def.background != "transparent" && def.background != "default" &&
           !def.background.empty()) {
         uint64_t channels = 0;
@@ -139,6 +158,7 @@ void resumeTerminal() {
     }
   }
 
+  // Single refresh
   notcurses_refresh(g_nc, nullptr, nullptr);
 
 #ifndef _WIN32
@@ -214,14 +234,31 @@ int main(int argc, char *argv[]) {
   setup_terminal_attributes();
   setup_signal_handlers();
 
-  struct notcurses_options opts = {
-      .termtype = nullptr,
-      .loglevel = NCLOGLEVEL_SILENT, // Use NCLOGLEVEL_DEBUG for debugging
-      .margin_t = 0,
-      .margin_r = 0,
-      .margin_b = 0,
-      .margin_l = 0,
-      .flags = NCOPTION_SUPPRESS_BANNERS | NCOPTION_NO_CLEAR_BITMAPS};
+  bool has_truecolor = false;
+  if (const char *colorterm = std::getenv("COLORTERM")) {
+    std::string ct = colorterm;
+    has_truecolor = (ct == "truecolor" || ct == "24bit");
+  }
+
+  if (!has_truecolor) {
+    if (const char *term = std::getenv("TERM")) {
+      std::string t = term;
+      has_truecolor = (t.find("direct") != std::string::npos ||
+                       t.find("kitty") != std::string::npos ||
+                       t.find("konsole") != std::string::npos);
+    }
+  }
+
+  const char *termtype = has_truecolor ? "xterm-direct" : nullptr;
+
+  struct notcurses_options opts = {.termtype = termtype,
+                                   .loglevel = NCLOGLEVEL_SILENT,
+                                   .margin_t = 0,
+                                   .margin_r = 0,
+                                   .margin_b = 0,
+                                   .margin_l = 0,
+                                   .flags = NCOPTION_SUPPRESS_BANNERS |
+                                            NCOPTION_NO_CLEAR_BITMAPS};
 
   notcurses *nc = notcurses_init(&opts, nullptr);
   if (!nc) {
@@ -229,6 +266,10 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
+  if (!notcurses_cantruecolor(nc)) {
+    std::cerr << "Warning: Terminal doesn't support true color!\n";
+    std::cerr << "Colors may appear incorrect.\n";
+  }
   ncplane *stdplane = notcurses_stdplane(nc);
 
   g_nc = nc;

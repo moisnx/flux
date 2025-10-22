@@ -173,6 +173,8 @@ void FileOpener::addAllowedCommand(const std::string &command) {
 
 void FileOpener::clearAllowedCommands() { allowed_commands_.clear(); }
 
+// In file_opener.cpp, replace the executeUnix function:
+
 #ifndef _WIN32
 bool FileOpener::executeUnix(const std::vector<std::string> &parts,
                              const std::filesystem::path &file_path,
@@ -180,22 +182,18 @@ bool FileOpener::executeUnix(const std::vector<std::string> &parts,
   if (suspend_callback_)
     suspend_callback_();
 
-#ifndef _WIN32
   pid_t parent_pgid = getpgrp();
   int tty_fd = -1;
 
   if (isatty(STDIN_FILENO)) {
     tty_fd = open("/dev/tty", O_RDWR);
   }
-#endif
 
   pid_t pid = fork();
 
   if (pid < 0) {
-#ifndef _WIN32
     if (tty_fd >= 0)
       close(tty_fd);
-#endif
     if (resume_callback_)
       resume_callback_();
     return false;
@@ -203,20 +201,14 @@ bool FileOpener::executeUnix(const std::vector<std::string> &parts,
 
   if (pid == 0) {
     // Child process
-
     if (wait) {
-#ifndef _WIN32
       if (tty_fd >= 0) {
-        // Create new process group
         setpgid(0, 0);
-
-        // Become foreground process
         tcsetpgrp(tty_fd, getpid());
-
         close(tty_fd);
       }
 
-      // Reset ALL signal handlers to defaults
+      // Reset signal handlers
       signal(SIGINT, SIG_DFL);
       signal(SIGQUIT, SIG_DFL);
       signal(SIGTSTP, SIG_DFL);
@@ -225,14 +217,11 @@ bool FileOpener::executeUnix(const std::vector<std::string> &parts,
       signal(SIGTTIN, SIG_DFL);
       signal(SIGTTOU, SIG_DFL);
 
-      // CRITICAL: Unblock all signals for the child
       sigset_t mask;
       sigemptyset(&mask);
       sigprocmask(SIG_SETMASK, &mask, nullptr);
-#endif
     } else {
       // GUI apps - fully detach
-#ifndef _WIN32
       if (tty_fd >= 0)
         close(tty_fd);
       setsid();
@@ -245,7 +234,6 @@ bool FileOpener::executeUnix(const std::vector<std::string> &parts,
         if (devnull > 2)
           close(devnull);
       }
-#endif
     }
 
     // Build and execute
@@ -264,17 +252,12 @@ bool FileOpener::executeUnix(const std::vector<std::string> &parts,
 
   // Parent process
   if (wait) {
-#ifndef _WIN32
     if (tty_fd >= 0) {
-      // Set child as its own process group
       setpgid(pid, pid);
-
-      // Make child foreground
       tcsetpgrp(tty_fd, pid);
     }
 
-    // CHANGE: Use SIG_IGN instead of blocking
-    // Save old handlers and set signals to ignore (not block!)
+    // Ignore signals during child execution
     struct sigaction old_winch, old_tstp, old_cont, old_ttin, old_ttou;
     struct sigaction ignore_action;
     ignore_action.sa_handler = SIG_IGN;
@@ -286,7 +269,6 @@ bool FileOpener::executeUnix(const std::vector<std::string> &parts,
     sigaction(SIGCONT, &ignore_action, &old_cont);
     sigaction(SIGTTIN, &ignore_action, &old_ttin);
     sigaction(SIGTTOU, &ignore_action, &old_ttou);
-#endif
 
     int status;
     pid_t result;
@@ -296,15 +278,18 @@ bool FileOpener::executeUnix(const std::vector<std::string> &parts,
       result = waitpid(pid, &status, 0);
     } while (result == -1 && errno == EINTR);
 
-#ifndef _WIN32
-    // Take back terminal control
+    // Take back terminal control smoothly
     if (tty_fd >= 0) {
-      // usleep(\1); // 20ms
+      // Give the child a moment to clean up
+      usleep(5000); // 5ms
+
+      // Reclaim terminal
       tcsetpgrp(tty_fd, parent_pgid);
       close(tty_fd);
     }
 
-    // usleep(\1); // 30ms
+    // Small delay before restoring signals
+    usleep(5000); // 5ms
 
     // Restore old signal handlers
     sigaction(SIGWINCH, &old_winch, nullptr);
@@ -312,7 +297,6 @@ bool FileOpener::executeUnix(const std::vector<std::string> &parts,
     sigaction(SIGCONT, &old_cont, nullptr);
     sigaction(SIGTTIN, &old_ttin, nullptr);
     sigaction(SIGTTOU, &old_ttou, nullptr);
-#endif
 
     if (resume_callback_)
       resume_callback_();
@@ -328,11 +312,9 @@ bool FileOpener::executeUnix(const std::vector<std::string> &parts,
     return false;
   } else {
     // Non-blocking
-#ifndef _WIN32
     if (tty_fd >= 0)
       close(tty_fd);
-#endif
-    // usleep(\1);
+
     if (resume_callback_)
       resume_callback_();
   }

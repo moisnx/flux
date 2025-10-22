@@ -2,7 +2,7 @@
 #pragma once
 
 #include "ui/theme.hpp"
-#include <notcurses/notcurses.h>   from ncurses
+#include <notcurses/notcurses.h>
 #include <optional>
 #include <string>
 

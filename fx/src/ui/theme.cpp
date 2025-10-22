@@ -65,23 +65,32 @@ Theme ThemeManager::applyThemeDefinition(const ThemeDefinition &def) {
 }
 
 uint32_t ThemeManager::parseHexColor(const std::string &color_str) {
-  // Handle special values (transparent/default)
+  // Handle special values
   if (color_str == "transparent" || color_str == "default" ||
       color_str.empty()) {
-    return 0x000000; // Use black as default (or you could return 0)
+    return 0x000000;
   }
 
   // Parse hex colors (#RRGGBB)
   if (color_str[0] == '#' && color_str.length() == 7) {
     try {
-      // Remove # and convert hex string to uint32_t
-      return std::stoul(color_str.substr(1), nullptr, 16);
+      // Parse as-is: this gives us 0xRRGGBB
+      uint32_t rgb = std::stoul(color_str.substr(1), nullptr, 16);
+
+      // Extract components
+      uint8_t r = (rgb >> 16) & 0xFF;
+      uint8_t g = (rgb >> 8) & 0xFF;
+      uint8_t b = rgb & 0xFF;
+
+      // Store in the SAME format for consistency
+      return (r << 16) | (g << 8) | b; // 0xRRGGBB
+
     } catch (...) {
-      return 0xFFFFFF; // Fallback to white on error
+      return 0xFFFFFF;
     }
   }
 
-  // Named colors (convert to hex)
+  // Named colors - store as RGB
   if (color_str == "black")
     return 0x000000;
   if (color_str == "red")
@@ -99,7 +108,7 @@ uint32_t ThemeManager::parseHexColor(const std::string &color_str) {
   if (color_str == "white")
     return 0xFFFFFF;
 
-  return 0xFFFFFF; // Final fallback to white
+  return 0xFFFFFF;
 }
 
 ThemeDefinition ThemeManager::getDefaultThemeDef() {
