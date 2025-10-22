@@ -504,9 +504,6 @@ FileOpener::openWithDefault(const std::string &file_path) {
     _exit(127);
   }
 
-  // Small delay to let xdg-open spawn its child
-  // usleep(\1); // 100ms
-
   if (resume_callback_)
     resume_callback_();
   return OpenResult{true, ""};
