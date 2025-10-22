@@ -19,7 +19,7 @@ if(WIN32)
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS OFF)
 
     if(MINGW)
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libgcc -static-libstdc++ -static")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libgcc -static-libstdc++")
     endif()
 
     if(MSVC)
@@ -30,13 +30,12 @@ if(WIN32)
 endif()
 
 # ============================================
-# Find ncurses/ncursesw
+# Find ncurses/ncursesw (for core library)
 # ============================================
-# Use PROJECT_SOURCE_DIR instead of CMAKE_SOURCE_DIR for proper subproject support
 set(DEPS_DIR ${PROJECT_SOURCE_DIR}/deps)
 
 if(WIN32)
-    # Windows: Use PDCursesMod (already has UTF-8 support via VT mode)
+    # Windows: Use PDCursesMod for the core flux library
     set(PDCURSESMOD_DIR ${DEPS_DIR}/PDCursesMod/wincon)
 
     if(EXISTS "${PDCURSESMOD_DIR}/pdcurses.lib")
@@ -52,7 +51,15 @@ if(WIN32)
         set(CURSES_INCLUDE_DIRS "${DEPS_DIR}/PDCursesMod")
         message(STATUS "PDCursesMod supports UTF-8 via VT mode")
     else()
-        message(FATAL_ERROR "PDCursesMod not found at ${PDCURSESMOD_DIR}. Please build it manually with nmake -f Makefile.vc HAVE_VT=Y")
+        message(WARNING "PDCursesMod not found at ${PDCURSESMOD_DIR}.")
+        message(WARNING "Using system ncurses from MSYS2 as fallback")
+
+        # Try to find ncurses via pkg-config in MSYS2
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(NCURSES REQUIRED ncursesw)
+
+        set(CURSES_LIBRARIES ${NCURSES_LIBRARIES})
+        set(CURSES_INCLUDE_DIRS ${NCURSES_INCLUDE_DIRS})
     endif()
 
 elseif(ANDROID)
@@ -109,8 +116,6 @@ else()
     endif()
 endif()
 
-
-
 # ============================================
 # Flux Library (Core + UI)
 # ============================================
@@ -118,17 +123,7 @@ endif()
 set(FLUX_CORE_SOURCES
     src/core/browser.cpp
     src/core/file_clipboard.cpp
-    # src/core/file_ops.cpp
-    # src/core/selection.cpp
-    # src/core/search.cpp
 )
-
-# set(FLUX_UI_SOURCES
-#     src/ui/renderer.cpp
-#     src/ui/theme.cpp
-#     src/ui/icon_provider.cpp
-#     # src/ui/preview.cpp
-# )
 
 set(FLUX_CONFIG_SOURCES
     # src/config/config.cpp
@@ -194,17 +189,31 @@ else()
 endif()
 
 # ============================================
-# Standalone Binary (fx)
+# Standalone Binary (fx) - NOW USES NOTCURSES
 # ============================================
 
 if(BUILD_STANDALONE)
-    # Find Notcurses for standalone binary
+    # Find Notcurses for standalone binary (ALL platforms including Windows)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(NOTCURSES notcurses)
+
     if(NOT NOTCURSES_FOUND)
-        message(FATAL_ERROR "Notcurses library not found. Please install Notcurses development files.")
+        if(WIN32)
+            message(FATAL_ERROR
+                "Notcurses library not found.\n"
+                "Install via MSYS2: pacman -S mingw-w64-x86_64-notcurses\n"
+                "Make sure you're building in MSYS2 MinGW64 environment."
+            )
+        else()
+            message(FATAL_ERROR
+                "Notcurses library not found.\n"
+                "Install on Ubuntu/Debian: sudo apt-get install libnotcurses-dev"
+            )
+        endif()
     endif()
 
+    message(STATUS "Found Notcurses: ${NOTCURSES_LIBRARIES}")
+    message(STATUS "Notcurses include dirs: ${NOTCURSES_INCLUDE_DIRS}")
 
     set(STANDALONE_SOURCES
         fx/main.cpp
@@ -219,26 +228,37 @@ if(BUILD_STANDALONE)
 
     add_executable(fx ${STANDALONE_SOURCES})
 
-    # Link to the main library 'flux' and curses
-    target_link_libraries(fx PRIVATE flux ${NOTCURSES_LIBRARIES})
+    # Link to the main library 'flux' and Notcurses
+    target_link_libraries(fx PRIVATE
+        flux
+        ${NOTCURSES_LIBRARIES}
+    )
 
     target_include_directories(fx PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/fx
         ${CURSES_INCLUDE_DIRS}
+        ${NOTCURSES_INCLUDE_DIRS}
     )
 
-    # Windows-specific settings for PDCursesMod
-    if(WIN32)
-        # CRITICAL: These must match how PDCursesMod was built
-        target_compile_definitions(fx PRIVATE
-            PDC_STATIC # Static linking
-            PDC_WIDE # Wide character support
-            PDC_FORCE_UTF8 # UTF-8 support
-        )
+    # Add Notcurses library directories
+    if(NOTCURSES_LIBRARY_DIRS)
+        target_link_directories(fx PRIVATE ${NOTCURSES_LIBRARY_DIRS})
+    endif()
 
+    # Windows-specific settings
+    if(WIN32)
         # Link additional Windows libraries
         target_link_libraries(fx PRIVATE winmm)
+
+        # If PDCursesMod is being used, add its definitions
+        if(EXISTS "${PDCURSESMOD_DIR}/pdcurses.lib")
+            target_compile_definitions(fx PRIVATE
+                PDC_STATIC
+                PDC_WIDE
+                PDC_FORCE_UTF8
+            )
+        endif()
 
         # If using MSVC, ensure static runtime
         if(MSVC)
@@ -290,28 +310,6 @@ if(BUILD_STANDALONE)
     endif()
 endif()
 
-
-# ============================================
-# Examples
-# ============================================
-
-# if(BUILD_EXAMPLES)
-#     # Simple embedding example
-#     add_executable(example_simple examples/embed_simple.cpp)
-#     target_link_libraries(example_simple PRIVATE flux)
-#     target_include_directories(example_simple PRIVATE ${PROJECT_SOURCE_DIR}/include)
-
-#     # Custom theme example
-#     add_executable(example_theme examples/embed_custom_theme.cpp)
-#     target_link_libraries(example_theme PRIVATE flux)
-#     target_include_directories(example_theme PRIVATE ${PROJECT_SOURCE_DIR}/include)
-
-#     # File picker example
-#     add_executable(example_picker examples/file_picker.cpp)
-#     target_link_libraries(example_picker PRIVATE flux)
-#     target_include_directories(example_picker PRIVATE ${PROJECT_SOURCE_DIR}/include)
-# endif()
-
 # ============================================
 # Installation (Only if enabled and standalone build)
 # ============================================
@@ -346,8 +344,6 @@ if(FLUX_INSTALL)
         COMPATIBILITY AnyNewerVersion
     )
 
-    # FIXED: Use PROJECT_SOURCE_DIR instead of CMAKE_SOURCE_DIR
-    # This ensures it works both standalone and as a subdirectory
     if(EXISTS "${PROJECT_SOURCE_DIR}/cmake/FluxConfig.cmake.in")
         configure_package_config_file(
             "${PROJECT_SOURCE_DIR}/cmake/FluxConfig.cmake.in"
@@ -384,11 +380,16 @@ if(NCURSESW_FOUND OR CURSES_HAVE_NCURSESW_H OR CURSES_HAVE_NCURSESW_NCURSES_H)
 else()
     message(STATUS "Wide character support: UNKNOWN (verify with ldd)")
 endif()
+
+if(BUILD_STANDALONE AND NOTCURSES_FOUND)
+    message(STATUS "Notcurses: ${NOTCURSES_LIBRARIES}")
+endif()
+
 message(STATUS "")
 message(STATUS "Build options:")
-message(STATUS " 	Standalone binary (fx): ${BUILD_STANDALONE}")
-message(STATUS " 	Examples: ${BUILD_EXAMPLES}")
-message(STATUS " 	Shared library: ${BUILD_SHARED_LIBS}")
+message(STATUS "        Standalone binary (fx): ${BUILD_STANDALONE}")
+message(STATUS "        Examples: ${BUILD_EXAMPLES}")
+message(STATUS "        Shared library: ${BUILD_SHARED_LIBS}")
 message(STATUS "")
 message(STATUS "Install prefix: ${CMAKE_INSTALL_PREFIX}")
 message(STATUS "========================================")
