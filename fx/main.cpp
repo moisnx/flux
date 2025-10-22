@@ -110,34 +110,35 @@ void suspendTerminal() {
 void resumeTerminal() {
   std::cout << "\033[2J\033[H" << std::flush;
 
-  // Reinitialize notcurses from scratch
-  struct notcurses_options opts = {.termtype = nullptr,
-                                   .loglevel = NCLOGLEVEL_SILENT,
-                                   .margin_t = 0,
-                                   .margin_r = 0,
-                                   .margin_b = 0,
-                                   .margin_l = 0,
-                                   .flags = NCOPTION_SUPPRESS_BANNERS |
-                                            NCOPTION_NO_CLEAR_BITMAPS};
-
+  struct notcurses_options opts = {/*...*/};
   g_nc = notcurses_init(&opts, nullptr);
-  if (!g_nc) {
-    std::cerr << "Failed to reinitialize notcurses\n";
+  if (!g_nc)
     return;
-  }
 
   g_stdplane = notcurses_stdplane(g_nc);
 
-  // Reapply theme if available
+  // Reapply theme
   if (g_theme_manager && !g_theme_name.empty()) {
     auto theme_path = fx::ThemeLoader::findThemeFile(g_theme_name);
     if (theme_path) {
       auto def = fx::ThemeLoader::loadFromTOML(*theme_path);
       g_theme = g_theme_manager->applyThemeDefinition(def);
+
+      // ADD THIS: Reapply background
+      if (def.background != "transparent" && def.background != "default" &&
+          !def.background.empty()) {
+        uint64_t channels = 0;
+        ncchannels_set_fg_rgb8(&channels, (g_theme.foreground >> 16) & 0xFF,
+                               (g_theme.foreground >> 8) & 0xFF,
+                               g_theme.foreground & 0xFF);
+        ncchannels_set_bg_rgb8(&channels, (g_theme.background >> 16) & 0xFF,
+                               (g_theme.background >> 8) & 0xFF,
+                               g_theme.background & 0xFF);
+        ncplane_set_base(g_stdplane, " ", 0, channels);
+      }
     }
   }
 
-  // Force a refresh
   notcurses_refresh(g_nc, nullptr, nullptr);
 
 #ifndef _WIN32
@@ -252,19 +253,26 @@ int main(int argc, char *argv[]) {
   // Theme loading stays mostly the same
   auto theme_path = fx::ThemeLoader::findThemeFile(theme_name);
   if (theme_path) {
-    std::cerr << "[fx] Loading theme: " << theme_name << " from " << *theme_path
-              << "\n";
+    // std::cerr << "[fx] Loading theme: " << theme_name << " from " <<
+    // *theme_path
+    //           << "\n";
     auto def = fx::ThemeLoader::loadFromTOML(*theme_path);
     theme = theme_manager.applyThemeDefinition(def);
     g_theme = theme;
-    // Note: No bkgd() call needed, notcurses handles this differently
-  } else {
-    std::cerr << "[fx] Theme '" << theme_name << "' not found, using default\n";
-    theme = theme_manager.applyThemeDefinition(
-        fx::ThemeManager::getDefaultThemeDef());
-    g_theme = theme;
-  }
 
+    // ADD THIS: Set the background for the entire stdplane
+    if (def.background != "transparent" && def.background != "default" &&
+        !def.background.empty()) {
+      uint64_t channels = 0;
+      ncchannels_set_fg_rgb8(&channels, (theme.foreground >> 16) & 0xFF,
+                             (theme.foreground >> 8) & 0xFF,
+                             theme.foreground & 0xFF);
+      ncchannels_set_bg_rgb8(&channels, (theme.background >> 16) & 0xFF,
+                             (theme.background >> 8) & 0xFF,
+                             theme.background & 0xFF);
+      ncplane_set_base(stdplane, " ", 0, channels);
+    }
+  }
   fx::InputPrompt::setTheme(theme);
   renderer.setTheme(theme);
   renderer.setIconStyle(use_icons ? fx::IconStyle::AUTO : fx::IconStyle::ASCII);
@@ -275,6 +283,7 @@ int main(int argc, char *argv[]) {
 
   while (running) {
     browser.updateScroll(renderer.getViewportHeight());
+    ncplane_erase(stdplane);
     renderer.render(browser);
 
     // Get input
@@ -295,6 +304,8 @@ int main(int argc, char *argv[]) {
 
     // Handle special keys first (these use ni.id)
     if (ni.id == NCKEY_RESIZE) {
+      ncplane_erase(stdplane);
+      browser.updateScroll(renderer.getViewportHeight());
       continue;
     } else if (ni.id == NCKEY_UP) {
       browser.selectPrevious();
@@ -524,8 +535,9 @@ void handle_sigcont(int sig) {
 }
 
 void handle_sigwinch(int sig) {
-  // Notcurses handles SIGWINCH internally, just trigger a refresh
-  if (!terminal_suspended && g_nc) {
+  if (!terminal_suspended && g_nc && g_stdplane) {
+    // Notcurses handles the actual resize, we just need to clear artifacts
+    ncplane_erase(g_stdplane);
     notcurses_refresh(g_nc, nullptr, nullptr);
   }
 }

@@ -42,22 +42,24 @@ void Renderer::clearToEOL() {
   unsigned width, height;
   ncplane_dim_yx(stdplane_, &height, &width);
 
-  unsigned cur_x, cur_y; // ✨ Changed from int to unsigned
+  unsigned cur_x, cur_y;
   ncplane_cursor_yx(stdplane_, &cur_y, &cur_x);
 
-  if (cur_x < width) { // ✨ No cast needed now
+  if (cur_x < width) {
     std::string spaces(width - cur_x, ' ');
     ncplane_putstr(stdplane_, spaces.c_str());
   }
 }
 
 void Renderer::render(const Browser &browser) {
-
   unsigned width, height;
   ncplane_dim_yx(stdplane_, &height, &width);
   viewport_height_ = std::max(1, static_cast<int>(height) - 4);
 
+  ncplane_set_styles(stdplane_, NCSTYLE_NONE);
+  setColors(theme_.foreground, theme_.background);
   ncplane_erase(stdplane_);
+
   renderHeader(browser);
   renderFileList(browser);
   renderStatus(browser);
