@@ -1,0 +1,31 @@
+# flux theme configuration file
+
+name = "Palenight"
+author = "Flux Generator"
+
+[colors]
+# Core Backgrounds & Text
+background = "#292D3E"
+foreground = "#A6ACCD"
+
+# File/directory listing colors
+selected = "#444267"
+directory = "#82AAFF"
+executable = "#C3E88D"
+hidden = "#676E95"
+symlink = "#C792EA"
+parent_dir = "#89DDFF"
+
+# UI components
+status_bar_bg = "#1E2030"
+status_bar_fg = "#A6ACCD"
+status_bar_active = "#FFCB6B"
+ui_secondary = "#717CB4"
+ui_border = "#464B5D"
+ui_accent = "#BB80B3"
+
+# Notifications/Alerts
+ui_error = "#FF5370"
+ui_warning = "#F78C6C"
+ui_info = "#82AAFF"
+ui_success = "#C3E88D"

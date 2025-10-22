@@ -1,0 +1,31 @@
+# flux theme configuration file
+
+name = "Solarized Dark"
+author = "Flux Generator"
+
+[colors]
+# Core Backgrounds & Text
+background = "#002B36"
+foreground = "#839496"
+
+# File/directory listing colors
+selected = "#073642"
+directory = "#268BD2"
+executable = "#859900"
+hidden = "#586E75"
+symlink = "#D33682"
+parent_dir = "#2AA198"
+
+# UI components
+status_bar_bg = "#073642"
+status_bar_fg = "#93A1A1"
+status_bar_active = "#B58900"
+ui_secondary = "#586E75"
+ui_border = "#073642"
+ui_accent = "#6C71C4"
+
+# Notifications/Alerts
+ui_error = "#DC322F"
+ui_warning = "#CB4B16"
+ui_info = "#268BD2"
+ui_success = "#859900"

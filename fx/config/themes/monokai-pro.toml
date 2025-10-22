@@ -1,0 +1,31 @@
+# flux theme configuration file
+
+name = "Monokai Pro"
+author = "Flux Generator"
+
+[colors]
+# Core Backgrounds & Text
+background = "#2D2A2E"
+foreground = "#FCFCFA"
+
+# File/directory listing colors
+selected = "#403E41"
+directory = "#78DCE8"
+executable = "#A9DC76"
+hidden = "#727072"
+symlink = "#AB9DF2"
+parent_dir = "#FF6188"
+
+# UI components
+status_bar_bg = "#221F22"
+status_bar_fg = "#FCFCFA"
+status_bar_active = "#FFD866"
+ui_secondary = "#939293"
+ui_border = "#5B595C"
+ui_accent = "#FC9867"
+
+# Notifications/Alerts
+ui_error = "#FF6188"
+ui_warning = "#FC9867"
+ui_info = "#78DCE8"
+ui_success = "#A9DC76"

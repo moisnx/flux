@@ -1,0 +1,31 @@
+# flux theme configuration file
+
+name = "Ayu Dark"
+author = "Flux Generator"
+
+[colors]
+# Core Backgrounds & Text
+background = "#0A0E14"
+foreground = "#B3B1AD"
+
+# File/directory listing colors
+selected = "#1F2430"
+directory = "#39BAE6"
+executable = "#C2D94C"
+hidden = "#4D5566"
+symlink = "#FFAE57"
+parent_dir = "#59C2FF"
+
+# UI components
+status_bar_bg = "#01060E"
+status_bar_fg = "#B3B1AD"
+status_bar_active = "#FFB454"
+ui_secondary = "#626A73"
+ui_border = "#1C1F26"
+ui_accent = "#F07178"
+
+# Notifications/Alerts
+ui_error = "#D95757"
+ui_warning = "#E6B450"
+ui_info = "#59C2FF"
+ui_success = "#AAD94C"

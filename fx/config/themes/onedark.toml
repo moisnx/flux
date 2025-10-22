@@ -1,0 +1,31 @@
+# flux theme configuration file
+
+name = "One Dark Pro"
+author = "Flux Generator"
+
+[colors]
+# Core Backgrounds & Text
+background = "#282C34"
+foreground = "#ABB2BF"
+
+# File/directory listing colors
+selected = "#2C323C"
+directory = "#61AFEF"
+executable = "#98C379"
+hidden = "#5C6370"
+symlink = "#C678DD"
+parent_dir = "#56B6C2"
+
+# UI components
+status_bar_bg = "#21252B"
+status_bar_fg = "#ABB2BF"
+status_bar_active = "#E5C07B"
+ui_secondary = "#5C6370"
+ui_border = "#181A1F"
+ui_accent = "#528BFF"
+
+# Notifications/Alerts
+ui_error = "#E06C75"
+ui_warning = "#D19A66"
+ui_info = "#61AFEF"
+ui_success = "#98C379"

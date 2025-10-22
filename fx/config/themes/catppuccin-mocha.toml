@@ -1,0 +1,31 @@
+# flux theme configuration file
+
+name = "Catppuccin Mocha"
+author = "Flux Generator"
+
+[colors]
+# Core Backgrounds & Text
+background = "#1E1E2E"
+foreground = "#CDD6F4"
+
+# File/directory listing colors
+selected = "#313244"
+directory = "#89B4FA"
+executable = "#A6E3A1"
+hidden = "#6C7086"
+symlink = "#F5C2E7"
+parent_dir = "#89DCEB"
+
+# UI components
+status_bar_bg = "#181825"
+status_bar_fg = "#CDD6F4"
+status_bar_active = "#F9E2AF"
+ui_secondary = "#585B70"
+ui_border = "#45475A"
+ui_accent = "#CBA6F7"
+
+# Notifications/Alerts
+ui_error = "#F38BA8"
+ui_warning = "#FAB387"
+ui_info = "#89B4FA"
+ui_success = "#A6E3A1"
