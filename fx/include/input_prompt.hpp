@@ -1,22 +1,30 @@
-#include <flux.h>
+// include/input_prompt.hpp
+#pragma once
+
+#include "ui/theme.hpp"
+#include <notcurses/notcurses.h>   from ncurses
+#include <optional>
+#include <string>
 
 namespace fx {
 
 class InputPrompt {
 public:
-  // Set theme for modal rendering
-  static void setTheme(const flux::Theme &theme);
+  static void setTheme(const Theme &theme);
 
-  // Get string input from user with a modal prompt
   static std::optional<std::string>
-  getString(const std::string &prompt, const std::string &default_value = "");
+  getString(notcurses *nc, ncplane *stdplane, const std::string &prompt,
+            const std::string &default_value = "");
 
-  // Get confirmation (y/n) with a modal prompt
-  static bool getConfirmation(const std::string &message);
+  static bool getConfirmation(notcurses *nc, ncplane *stdplane,
+                              const std::string &message);
 
 private:
-  static void renderModal(const std::string &prompt, const std::string &input,
-                          size_t cursor_pos);
+  static void renderModal(ncplane *modal_plane, const std::string &prompt,
+                          const std::string &input, size_t cursor_pos);
+
+  static void renderConfirmationModal(ncplane *modal_plane,
+                                      const std::string &message);
 };
 
 } // namespace fx

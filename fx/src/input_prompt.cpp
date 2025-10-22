@@ -1,15 +1,5 @@
 #include "include/input_prompt.hpp"
-
-#ifdef _WIN32
-#include <windows.h>
-#define WIN32_LEAN_AND_MEAN
-#include <curses.h>
-#include <shellapi.h>
-#else
-#include <ncursesw/ncurses.h>
-#include <termios.h>
-#include <unistd.h>
-#endif
+#include <notcurses/notcurses.h>
 
 #ifndef CTRL
 #define CTRL(c) ((c) & 0x1f)
@@ -17,94 +7,99 @@
 
 namespace fx {
 
-// Static member to hold theme reference
-static flux::Theme *g_input_theme = nullptr;
+static Theme *g_input_theme = nullptr;
 
-void InputPrompt::setTheme(const flux::Theme &theme) {
-  static flux::Theme stored_theme = theme;
+void InputPrompt::setTheme(const Theme &theme) {
+  static Theme stored_theme = theme;
   stored_theme = theme;
   g_input_theme = &stored_theme;
 }
 
 std::optional<std::string>
-InputPrompt::getString(const std::string &prompt,
+InputPrompt::getString(notcurses *nc, ncplane *stdplane,
+                       const std::string &prompt,
                        const std::string &default_value) {
   std::string input = default_value;
   size_t cursor_pos = input.length();
 
-  // Save current screen state
-  WINDOW *saved = dupwin(stdscr);
+  // Get screen dimensions
+  unsigned max_y, max_x;
+  ncplane_dim_yx(stdplane, &max_y, &max_x);
 
-  // Enable cursor
-  curs_set(1);
+  // Calculate modal dimensions
+  int modal_width = std::min(60, static_cast<int>(max_x) - 4);
+  int modal_height = 7;
+  int start_y = (static_cast<int>(max_y) - modal_height) / 2;
+  int start_x = (static_cast<int>(max_x) - modal_width) / 2;
 
+  // Create modal plane
+  struct ncplane_options nopts = {
+      .y = start_y,
+      .x = start_x,
+      .rows = static_cast<unsigned>(modal_height),
+      .cols = static_cast<unsigned>(modal_width),
+      .userptr = nullptr,
+      .name = "input_modal",
+      .resizecb = nullptr,
+      .flags = 0,
+      .margin_b = 0,
+      .margin_r = 0,
+  };
+
+  ncplane *modal_plane = ncplane_create(stdplane, &nopts);
+  if (!modal_plane) {
+    return std::nullopt;
+  }
+
+  // Show cursor
+  notcurses_cursor_enable(nc, start_y + 4, start_x + 3);
+
+  ncinput ni;
   while (true) {
-    renderModal(prompt, input, cursor_pos);
+    renderModal(modal_plane, prompt, input, cursor_pos);
+    notcurses_render(nc);
 
-    int ch = getch();
+    uint32_t key = notcurses_get_blocking(nc, &ni);
 
-    switch (ch) {
-    case 27: // Escape - cancel
-      curs_set(0);
-      // Restore screen
-      overwrite(saved, stdscr);
-      delwin(saved);
-      refresh();
+    if (key == 27) { // Escape - cancel
+      notcurses_cursor_disable(nc);
+      ncplane_destroy(modal_plane);
+      ncplane_erase(stdplane);
+      notcurses_render(nc);
       return std::nullopt;
-
-    case KEY_ENTER:
-    case 10:
-    case 13: // Enter - confirm
-      curs_set(0);
-      // Restore screen
-      overwrite(saved, stdscr);
-      delwin(saved);
-      refresh();
+    } else if (ni.id == NCKEY_ENTER || key == 10 ||
+               key == 13) { // Enter - confirm
+      notcurses_cursor_disable(nc);
+      ncplane_destroy(modal_plane);
+      ncplane_erase(stdplane);
+      notcurses_render(nc);
       return input;
-
-    case KEY_BACKSPACE:
-    case 127:
-    case 8: // Backspace
+    } else if (ni.id == NCKEY_BACKSPACE || key == 127 ||
+               key == 8) { // Backspace
       if (cursor_pos > 0 && !input.empty()) {
         input.erase(cursor_pos - 1, 1);
         cursor_pos--;
       }
-      break;
-
-    case KEY_DC: // Delete key
+    } else if (ni.id == NCKEY_DEL) { // Delete
       if (cursor_pos < input.length()) {
         input.erase(cursor_pos, 1);
       }
-      break;
-
-    case KEY_LEFT:
+    } else if (ni.id == NCKEY_LEFT) {
       if (cursor_pos > 0) {
         cursor_pos--;
       }
-      break;
-
-    case KEY_RIGHT:
+    } else if (ni.id == NCKEY_RIGHT) {
       if (cursor_pos < input.length()) {
         cursor_pos++;
       }
-      break;
-
-    case KEY_HOME:
-    case CTRL('a'):
+    } else if (ni.id == NCKEY_HOME || key == CTRL('a')) {
       cursor_pos = 0;
-      break;
-
-    case KEY_END:
-    case CTRL('e'):
+    } else if (ni.id == NCKEY_END || key == CTRL('e')) {
       cursor_pos = input.length();
-      break;
-
-    case CTRL('u'): // Clear line
+    } else if (key == CTRL('u')) { // Clear line
       input.clear();
       cursor_pos = 0;
-      break;
-
-    case CTRL('w'): // Delete word backward
+    } else if (key == CTRL('w')) { // Delete word backward
       while (cursor_pos > 0 && input[cursor_pos - 1] == ' ') {
         input.erase(cursor_pos - 1, 1);
         cursor_pos--;
@@ -113,224 +108,288 @@ InputPrompt::getString(const std::string &prompt,
         input.erase(cursor_pos - 1, 1);
         cursor_pos--;
       }
-      break;
-
-    default:
-      // Only allow printable characters
-      if (ch >= 32 && ch < 127) {
-        input.insert(cursor_pos, 1, static_cast<char>(ch));
-        cursor_pos++;
-      }
-      break;
+    } else if (key >= 32 && key < 127) { // Printable characters
+      input.insert(cursor_pos, 1, static_cast<char>(key));
+      cursor_pos++;
     }
+
+    // Update cursor position
+    int display_start = 0;
+    int visible_width = modal_width - 6;
+    if (static_cast<int>(cursor_pos) >= visible_width) {
+      display_start = cursor_pos - visible_width + 1;
+    }
+    int cursor_display_pos = cursor_pos - display_start;
+    notcurses_cursor_enable(nc, start_y + 4, start_x + 3 + cursor_display_pos);
   }
 }
 
-void InputPrompt::renderModal(const std::string &prompt,
+void InputPrompt::renderModal(ncplane *modal_plane, const std::string &prompt,
                               const std::string &input, size_t cursor_pos) {
-  int max_y, max_x;
-  getmaxyx(stdscr, max_y, max_x);
+  unsigned modal_height, modal_width;
+  ncplane_dim_yx(modal_plane, &modal_height, &modal_width);
 
-  // Calculate modal dimensions
-  int modal_width = std::min(60, max_x - 4);
-  int modal_height = 7;
-  int start_y = (max_y - modal_height) / 2;
-  int start_x = (max_x - modal_width) / 2;
+  ncplane_erase(modal_plane);
 
-  // Create a window for the modal
-  WINDOW *modal_win = newwin(modal_height, modal_width, start_y, start_x);
-
-  // Apply theme colors if available
-  if (g_input_theme && has_colors()) {
-    wbkgd(modal_win, COLOR_PAIR(g_input_theme->status_bar));
+  // Set background
+  if (g_input_theme) {
+    uint64_t channels = 0;
+    ncchannels_set_fg_rgb8(&channels, (g_input_theme->foreground >> 16) & 0xFF,
+                           (g_input_theme->foreground >> 8) & 0xFF,
+                           g_input_theme->foreground & 0xFF);
+    ncchannels_set_bg_rgb8(&channels, (g_input_theme->status_bar >> 16) & 0xFF,
+                           (g_input_theme->status_bar >> 8) & 0xFF,
+                           g_input_theme->status_bar & 0xFF);
+    ncplane_set_channels(modal_plane, channels);
   }
 
-  // Draw border with theme colors
-  if (g_input_theme && has_colors()) {
-    wattron(modal_win, COLOR_PAIR(g_input_theme->ui_border));
+  // Draw border with Unicode box drawing
+  if (g_input_theme) {
+    uint64_t channels = 0;
+    ncchannels_set_fg_rgb8(&channels, (g_input_theme->ui_border >> 16) & 0xFF,
+                           (g_input_theme->ui_border >> 8) & 0xFF,
+                           g_input_theme->ui_border & 0xFF);
+    ncplane_set_channels(modal_plane, channels);
   }
 
-  box(modal_win, 0, 0);
+  // Draw box manually with Unicode
+  ncplane_putstr_yx(modal_plane, 0, 0, "┌");
+  for (unsigned i = 1; i < modal_width - 1; ++i) {
+    ncplane_putstr(modal_plane, "─");
+  }
+  ncplane_putstr(modal_plane, "┐");
 
-  if (g_input_theme && has_colors()) {
-    wattroff(modal_win, COLOR_PAIR(g_input_theme->background));
+  for (unsigned i = 1; i < modal_height - 1; ++i) {
+    ncplane_putstr_yx(modal_plane, i, 0, "│");
+    ncplane_putstr_yx(modal_plane, i, modal_width - 1, "│");
   }
 
-  // Draw title bar with accent color
-  if (g_input_theme && has_colors()) {
-    wattron(modal_win, COLOR_PAIR(g_input_theme->ui_accent) | A_BOLD);
-  } else {
-    wattron(modal_win, A_BOLD);
+  ncplane_putstr_yx(modal_plane, modal_height - 1, 0, "└");
+  for (unsigned i = 1; i < modal_width - 1; ++i) {
+    ncplane_putstr(modal_plane, "─");
+  }
+  ncplane_putstr(modal_plane, "┘");
+
+  // Draw prompt with accent color
+  if (g_input_theme) {
+    uint64_t channels = 0;
+    ncchannels_set_fg_rgb8(&channels, (g_input_theme->ui_accent >> 16) & 0xFF,
+                           (g_input_theme->ui_accent >> 8) & 0xFF,
+                           g_input_theme->ui_accent & 0xFF);
+    ncplane_set_channels(modal_plane, channels);
+    ncplane_set_styles(modal_plane, NCSTYLE_BOLD);
   }
 
-  mvwprintw(modal_win, 1, 2, "%s", prompt.c_str());
+  ncplane_putstr_yx(modal_plane, 1, 2, prompt.c_str());
+  ncplane_set_styles(modal_plane, NCSTYLE_NONE);
 
-  if (g_input_theme && has_colors()) {
-    wattroff(modal_win, COLOR_PAIR(g_input_theme->ui_accent) | A_BOLD);
-  } else {
-    wattroff(modal_win, A_BOLD);
-  }
-
-  // Draw input box background
+  // Draw input box border
   int input_y = 3;
   int input_x = 2;
   int input_width = modal_width - 4;
 
-  // Draw input box border
-  if (g_input_theme && has_colors()) {
-    wattron(modal_win, COLOR_PAIR(g_input_theme->ui_border));
+  if (g_input_theme) {
+    uint64_t channels = 0;
+    ncchannels_set_fg_rgb8(&channels, (g_input_theme->ui_border >> 16) & 0xFF,
+                           (g_input_theme->ui_border >> 8) & 0xFF,
+                           g_input_theme->ui_border & 0xFF);
+    ncplane_set_channels(modal_plane, channels);
   }
 
-  mvwhline(modal_win, input_y, input_x, ACS_HLINE, input_width);
-  mvwhline(modal_win, input_y + 2, input_x, ACS_HLINE, input_width);
-  mvwvline(modal_win, input_y, input_x - 1, ACS_VLINE, 3);
-  mvwvline(modal_win, input_y, input_x + input_width, ACS_VLINE, 3);
-  mvwaddch(modal_win, input_y, input_x - 1, ACS_ULCORNER);
-  mvwaddch(modal_win, input_y, input_x + input_width, ACS_URCORNER);
-  mvwaddch(modal_win, input_y + 2, input_x - 1, ACS_LLCORNER);
-  mvwaddch(modal_win, input_y + 2, input_x + input_width, ACS_LRCORNER);
-
-  if (g_input_theme && has_colors()) {
-    wattroff(modal_win, COLOR_PAIR(g_input_theme->ui_border));
+  // Draw input box with Unicode
+  ncplane_putstr_yx(modal_plane, input_y, input_x - 1, "┌");
+  for (int i = 0; i < input_width; ++i) {
+    ncplane_putstr(modal_plane, "─");
   }
+  ncplane_putstr(modal_plane, "┐");
+
+  ncplane_putstr_yx(modal_plane, input_y + 1, input_x - 1, "│");
+  ncplane_putstr_yx(modal_plane, input_y + 1, input_x + input_width, "│");
+
+  ncplane_putstr_yx(modal_plane, input_y + 2, input_x - 1, "└");
+  for (int i = 0; i < input_width; ++i) {
+    ncplane_putstr(modal_plane, "─");
+  }
+  ncplane_putstr(modal_plane, "┘");
 
   // Draw input text
-  if (g_input_theme && has_colors()) {
-    wattron(modal_win, COLOR_PAIR(g_input_theme->foreground));
+  if (g_input_theme) {
+    uint64_t channels = 0;
+    ncchannels_set_fg_rgb8(&channels, (g_input_theme->foreground >> 16) & 0xFF,
+                           (g_input_theme->foreground >> 8) & 0xFF,
+                           g_input_theme->foreground & 0xFF);
+    ncplane_set_channels(modal_plane, channels);
   }
 
-  // Calculate visible portion of input if it's too long
+  // Calculate visible portion
   int visible_width = input_width - 2;
   size_t display_start = 0;
-
-  if (cursor_pos >= visible_width) {
+  if (static_cast<int>(cursor_pos) >= visible_width) {
     display_start = cursor_pos - visible_width + 1;
   }
 
   std::string visible_input = input.substr(display_start, visible_width);
-  mvwprintw(modal_win, input_y + 1, input_x + 1, "%s", visible_input.c_str());
-
-  if (g_input_theme && has_colors()) {
-    wattroff(modal_win, COLOR_PAIR(g_input_theme->foreground));
-  }
+  ncplane_putstr_yx(modal_plane, input_y + 1, input_x + 1,
+                    visible_input.c_str());
 
   // Draw help text
-  if (g_input_theme && has_colors()) {
-    wattron(modal_win, COLOR_PAIR(g_input_theme->ui_secondary));
+  if (g_input_theme) {
+    uint64_t channels = 0;
+    ncchannels_set_fg_rgb8(&channels,
+                           (g_input_theme->ui_secondary >> 16) & 0xFF,
+                           (g_input_theme->ui_secondary >> 8) & 0xFF,
+                           g_input_theme->ui_secondary & 0xFF);
+    ncplane_set_channels(modal_plane, channels);
   }
 
   std::string help_text = "Enter to confirm • Esc to cancel";
   int help_x = (modal_width - static_cast<int>(help_text.size())) / 2;
-  mvwprintw(modal_win, modal_height - 2, help_x, "%s", help_text.c_str());
-
-  if (g_input_theme && has_colors()) {
-    wattroff(modal_win, COLOR_PAIR(g_input_theme->ui_secondary));
-  }
-
-  // Position cursor in the modal
-  int cursor_display_pos = cursor_pos - display_start;
-  wmove(modal_win, input_y + 1, input_x + 1 + cursor_display_pos);
-
-  // Refresh modal window
-  wrefresh(modal_win);
-
-  // Clean up
-  delwin(modal_win);
+  ncplane_putstr_yx(modal_plane, modal_height - 2, help_x, help_text.c_str());
 }
 
-bool InputPrompt::getConfirmation(const std::string &message) {
-  int max_y, max_x;
-  getmaxyx(stdscr, max_y, max_x);
-
-  // Save current screen
-  WINDOW *saved = dupwin(stdscr);
+bool InputPrompt::getConfirmation(notcurses *nc, ncplane *stdplane,
+                                  const std::string &message) {
+  unsigned max_y, max_x;
+  ncplane_dim_yx(stdplane, &max_y, &max_x);
 
   // Calculate modal dimensions
-  int modal_width = std::min(50, max_x - 4);
+  int modal_width = std::min(50, static_cast<int>(max_x) - 4);
   int modal_height = 6;
-  int start_y = (max_y - modal_height) / 2;
-  int start_x = (max_x - modal_width) / 2;
+  int start_y = (static_cast<int>(max_y) - modal_height) / 2;
+  int start_x = (static_cast<int>(max_x) - modal_width) / 2;
 
-  WINDOW *modal_win = newwin(modal_height, modal_width, start_y, start_x);
+  // Create modal plane
+  struct ncplane_options nopts = {
+      .y = start_y,
+      .x = start_x,
+      .rows = static_cast<unsigned>(modal_height),
+      .cols = static_cast<unsigned>(modal_width),
+      .userptr = nullptr,
+      .name = "confirm_modal",
+      .resizecb = nullptr,
+      .flags = 0,
+      .margin_b = 0,
+      .margin_r = 0,
+  };
 
-  // Apply theme colors
-  if (g_input_theme && has_colors()) {
-    wbkgd(modal_win, COLOR_PAIR(g_input_theme->status_bar));
-    wattron(modal_win, COLOR_PAIR(g_input_theme->ui_border));
+  ncplane *modal_plane = ncplane_create(stdplane, &nopts);
+  if (!modal_plane) {
+    return false;
   }
 
-  box(modal_win, 0, 0);
-
-  if (g_input_theme && has_colors()) {
-    wattroff(modal_win, COLOR_PAIR(g_input_theme->ui_border));
-  }
-
-  // Draw warning icon and message
-  if (g_input_theme && has_colors()) {
-    wattron(modal_win, COLOR_PAIR(g_input_theme->ui_warning) | A_BOLD);
-  } else {
-    wattron(modal_win, A_BOLD);
-  }
-
-  mvwprintw(modal_win, 1, 2, "⚠ Confirmation");
-
-  if (g_input_theme && has_colors()) {
-    wattroff(modal_win, COLOR_PAIR(g_input_theme->ui_warning) | A_BOLD);
-  } else {
-    wattroff(modal_win, A_BOLD);
-  }
-
-  // Message text
-  if (g_input_theme && has_colors()) {
-    wattron(modal_win, COLOR_PAIR(g_input_theme->foreground));
-  }
-
-  mvwprintw(modal_win, 3, 2, "%s", message.c_str());
-
-  if (g_input_theme && has_colors()) {
-    wattroff(modal_win, COLOR_PAIR(g_input_theme->foreground));
-  }
-
-  // Options
-  if (g_input_theme && has_colors()) {
-    wattron(modal_win, COLOR_PAIR(g_input_theme->ui_success));
-  }
-  mvwprintw(modal_win, modal_height - 2, 4, "[Y]es");
-  if (g_input_theme && has_colors()) {
-    wattroff(modal_win, COLOR_PAIR(g_input_theme->ui_success));
-    wattron(modal_win, COLOR_PAIR(g_input_theme->ui_error));
-  }
-  mvwprintw(modal_win, modal_height - 2, modal_width - 12, "[N]o/Esc");
-  if (g_input_theme && has_colors()) {
-    wattroff(modal_win, COLOR_PAIR(g_input_theme->ui_error));
-  }
-
-  wrefresh(modal_win);
+  renderConfirmationModal(modal_plane, message);
+  notcurses_render(nc);
 
   bool result = false;
+  ncinput ni;
+
   while (true) {
-    int ch = getch();
+    uint32_t key = notcurses_get_blocking(nc, &ni);
 
-    switch (ch) {
-    case 'y':
-    case 'Y':
+    if (key == 'y' || key == 'Y') {
       result = true;
-      goto cleanup;
-
-    case 'n':
-    case 'N':
-    case 27: // Escape
+      break;
+    } else if (key == 'n' || key == 'N' || key == 27) { // Escape
       result = false;
-      goto cleanup;
+      break;
     }
   }
 
-cleanup:
-  delwin(modal_win);
-  overwrite(saved, stdscr);
-  delwin(saved);
-  refresh();
+  ncplane_destroy(modal_plane);
+  ncplane_erase(stdplane);
+  notcurses_render(nc);
   return result;
+}
+
+void InputPrompt::renderConfirmationModal(ncplane *modal_plane,
+                                          const std::string &message) {
+  unsigned modal_height, modal_width;
+  ncplane_dim_yx(modal_plane, &modal_height, &modal_width);
+
+  ncplane_erase(modal_plane);
+
+  // Set background
+  if (g_input_theme) {
+    uint64_t channels = 0;
+    ncchannels_set_fg_rgb8(&channels, (g_input_theme->foreground >> 16) & 0xFF,
+                           (g_input_theme->foreground >> 8) & 0xFF,
+                           g_input_theme->foreground & 0xFF);
+    ncchannels_set_bg_rgb8(&channels, (g_input_theme->status_bar >> 16) & 0xFF,
+                           (g_input_theme->status_bar >> 8) & 0xFF,
+                           g_input_theme->status_bar & 0xFF);
+    ncplane_set_channels(modal_plane, channels);
+  }
+
+  // Draw border
+  if (g_input_theme) {
+    uint64_t channels = 0;
+    ncchannels_set_fg_rgb8(&channels, (g_input_theme->ui_border >> 16) & 0xFF,
+                           (g_input_theme->ui_border >> 8) & 0xFF,
+                           g_input_theme->ui_border & 0xFF);
+    ncplane_set_channels(modal_plane, channels);
+  }
+
+  // Draw box with Unicode
+  ncplane_putstr_yx(modal_plane, 0, 0, "┌");
+  for (unsigned i = 1; i < modal_width - 1; ++i) {
+    ncplane_putstr(modal_plane, "─");
+  }
+  ncplane_putstr(modal_plane, "┐");
+
+  for (unsigned i = 1; i < modal_height - 1; ++i) {
+    ncplane_putstr_yx(modal_plane, i, 0, "│");
+    ncplane_putstr_yx(modal_plane, i, modal_width - 1, "│");
+  }
+
+  ncplane_putstr_yx(modal_plane, modal_height - 1, 0, "└");
+  for (unsigned i = 1; i < modal_width - 1; ++i) {
+    ncplane_putstr(modal_plane, "─");
+  }
+  ncplane_putstr(modal_plane, "┘");
+
+  // Draw warning title
+  if (g_input_theme) {
+    uint64_t channels = 0;
+    ncchannels_set_fg_rgb8(&channels, (g_input_theme->ui_warning >> 16) & 0xFF,
+                           (g_input_theme->ui_warning >> 8) & 0xFF,
+                           g_input_theme->ui_warning & 0xFF);
+    ncplane_set_channels(modal_plane, channels);
+    ncplane_set_styles(modal_plane, NCSTYLE_BOLD);
+  }
+
+  ncplane_putstr_yx(modal_plane, 1, 2, "⚠ Confirmation");
+  ncplane_set_styles(modal_plane, NCSTYLE_NONE);
+
+  // Message text
+  if (g_input_theme) {
+    uint64_t channels = 0;
+    ncchannels_set_fg_rgb8(&channels, (g_input_theme->foreground >> 16) & 0xFF,
+                           (g_input_theme->foreground >> 8) & 0xFF,
+                           g_input_theme->foreground & 0xFF);
+    ncplane_set_channels(modal_plane, channels);
+  }
+
+  ncplane_putstr_yx(modal_plane, 3, 2, message.c_str());
+
+  // Options
+  if (g_input_theme) {
+    uint64_t channels = 0;
+    ncchannels_set_fg_rgb8(&channels, (g_input_theme->ui_success >> 16) & 0xFF,
+                           (g_input_theme->ui_success >> 8) & 0xFF,
+                           g_input_theme->ui_success & 0xFF);
+    ncplane_set_channels(modal_plane, channels);
+  }
+  ncplane_putstr_yx(modal_plane, modal_height - 2, 4, "[Y]es");
+
+  if (g_input_theme) {
+    uint64_t channels = 0;
+    ncchannels_set_fg_rgb8(&channels, (g_input_theme->ui_error >> 16) & 0xFF,
+                           (g_input_theme->ui_error >> 8) & 0xFF,
+                           g_input_theme->ui_error & 0xFF);
+    ncplane_set_channels(modal_plane, channels);
+  }
+  ncplane_putstr_yx(modal_plane, modal_height - 2, modal_width - 12,
+                    "[N]o/Esc");
 }
 
 } // namespace fx

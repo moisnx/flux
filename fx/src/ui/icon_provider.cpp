@@ -1,9 +1,9 @@
-#include "flux/ui/icon_provider.h"
+#include "include/ui/icon_provider.hpp"
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
 
-namespace flux {
+namespace fx {
 
 IconProvider::IconProvider(IconStyle style) : current_style_(style) {
   // Auto-detect if requested
@@ -397,4 +397,4 @@ std::string IconProvider::getFileIcon(const std::string &filename) const {
   return "\uf15b"; //
 }
 
-} // namespace flux
+} // namespace fx

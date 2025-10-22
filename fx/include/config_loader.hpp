@@ -265,7 +265,7 @@ mode = "miller"
 show_hidden = false
 
 [appearance]
-theme = "catppuccin"
+theme = "nord"
 icons = true
 border_style = "rounded"
 
@@ -278,7 +278,7 @@ default = "xdg-open"
 
 [[file_handlers.rules]]
 extensions = ["cpp", "h", "c"]
-command = "nvim"
+command = "nano"
 terminal = true
 
 [[file_handlers.rules]]

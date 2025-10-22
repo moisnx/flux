@@ -1,12 +1,3 @@
-//**
-// Flux Clipboard Core
-// This file contains all the clipboard core features for FLUX(FX)
-// It includes platform macros to handle different SYSTEMS(Unix, Windows, MacOS)
-// As each has its different APIs when it comes to clipbaord.
-//
-// @author moisnx
-// */
-
 #ifndef FILE_CLIPBOARD_H
 #define FILE_CLIPBOARD_H
 

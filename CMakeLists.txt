@@ -123,12 +123,12 @@ set(FLUX_CORE_SOURCES
     # src/core/search.cpp
 )
 
-set(FLUX_UI_SOURCES
-    src/ui/renderer.cpp
-    src/ui/theme.cpp
-    src/ui/icon_provider.cpp
-    # src/ui/preview.cpp
-)
+# set(FLUX_UI_SOURCES
+#     src/ui/renderer.cpp
+#     src/ui/theme.cpp
+#     src/ui/icon_provider.cpp
+#     # src/ui/preview.cpp
+# )
 
 set(FLUX_CONFIG_SOURCES
     # src/config/config.cpp
@@ -198,17 +198,29 @@ endif()
 # ============================================
 
 if(BUILD_STANDALONE)
+    # Find Notcurses for standalone binary
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(NOTCURSES notcurses)
+    if(NOT NOTCURSES_FOUND)
+        message(FATAL_ERROR "Notcurses library not found. Please install Notcurses development files.")
+    endif()
+
+
     set(STANDALONE_SOURCES
         fx/main.cpp
         fx/src/theme_loader.cpp
         fx/src/file_opener.cpp
         fx/src/input_prompt.cpp
+        # UI
+        fx/src/ui/renderer.cpp
+        fx/src/ui/icon_provider.cpp
+        fx/src/ui/theme.cpp
     )
 
     add_executable(fx ${STANDALONE_SOURCES})
 
     # Link to the main library 'flux' and curses
-    target_link_libraries(fx PRIVATE flux ${CURSES_LIBRARIES})
+    target_link_libraries(fx PRIVATE flux ${NOTCURSES_LIBRARIES})
 
     target_include_directories(fx PRIVATE
         ${PROJECT_SOURCE_DIR}/include

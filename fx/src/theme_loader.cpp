@@ -6,7 +6,7 @@
 
 namespace fx {
 
-flux::ThemeDefinition ThemeLoader::loadFromTOML(const std::string &path) {
+ThemeDefinition ThemeLoader::loadFromTOML(const std::string &path) {
   try {
     auto data = toml::parse_file(path);
     return parseThemeData(data);
@@ -14,11 +14,11 @@ flux::ThemeDefinition ThemeLoader::loadFromTOML(const std::string &path) {
     std::cerr << "Error loading theme from " << path << ": " << e.what()
               << "\n";
     std::cerr << "Falling back to default theme\n";
-    return flux::ThemeManager::getDefaultThemeDef();
+    return ThemeManager::getDefaultThemeDef();
   }
 }
 
-flux::ThemeDefinition
+ThemeDefinition
 ThemeLoader::loadFromTOMLString(const std::string &toml_content) {
   try {
     auto data = toml::parse(toml_content);
@@ -26,12 +26,12 @@ ThemeLoader::loadFromTOMLString(const std::string &toml_content) {
   } catch (const std::exception &e) {
     std::cerr << "Error parsing TOML: " << e.what() << "\n";
     std::cerr << "Falling back to default theme\n";
-    return flux::ThemeManager::getDefaultThemeDef();
+    return ThemeManager::getDefaultThemeDef();
   }
 }
 
-flux::ThemeDefinition ThemeLoader::parseThemeData(const toml::table &data) {
-  flux::ThemeDefinition def;
+ThemeDefinition ThemeLoader::parseThemeData(const toml::table &data) {
+  ThemeDefinition def;
 
   // Parse name
   if (auto name = data["name"].value<std::string>()) {

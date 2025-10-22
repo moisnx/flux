@@ -1,10 +1,10 @@
-#ifndef ICON_PROVIDER_H
-#define ICON_PROVIDER_H
+#ifndef FX_ICON_PROVIDER_H
+#define FX_ICON_PROVIDER_H
 
 #include <string>
 #include <unordered_map>
 
-namespace flux {
+namespace fx {
 
 enum class IconStyle {
   ASCII,      // Safe ASCII icons: +, *, @, etc.
@@ -40,5 +40,5 @@ private:
   std::string getFileExtension(const std::string &filename) const;
 };
 
-} // namespace flux
-#endif // ICON_PROVIDER_H
+} // namespace fx
+#endif

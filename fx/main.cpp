@@ -2,24 +2,26 @@
 #include "include/file_opener.hpp"
 #include "include/input_prompt.hpp"
 #include "include/theme_loader.hpp"
+#include "include/ui/renderer.hpp"
+#include "include/ui/theme.hpp"
 
-// #include <algorithm>
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
 #include <flux.h>
 #include <iostream>
-// #include <locale>
 
+// REPLACE ncurses includes with notcurses
 #ifdef _WIN32
-#include <windows.h>
-#define WIN32_LEAN_AND_MEAN
-#include <curses.h>
-#include <shellapi.h>
+#error "Notcurses migration not yet supported on Windows"
 #else
-#include <ncursesw/ncurses.h>
+#include <notcurses/notcurses.h>
 #include <termios.h>
 #include <unistd.h>
+#endif
+
+#ifndef CTRL
+#define CTRL(c) ((c) & 0x1f)
 #endif
 
 #ifndef CTRL
@@ -33,6 +35,7 @@ void openFileWithHandler(const std::string &filePath, const fx::Config &config);
 std::optional<fx::FileHandler> findMatchingHandler(const std::string &filePath,
                                                    const fx::Config &config);
 
+// Global variables for terminal state
 #ifndef _WIN32
 struct termios original_termios;
 static struct sigaction original_sigwinch;
@@ -40,10 +43,12 @@ static struct sigaction original_sigtstp;
 static struct sigaction original_sigcont;
 #endif
 
-// Global variables for terminal state
-static flux::ThemeManager *g_theme_manager = nullptr;
+// UPDATED globals for notcurses
+static notcurses *g_nc = nullptr;
+static ncplane *g_stdplane = nullptr;
+static fx::ThemeManager *g_theme_manager = nullptr;
 static std::string g_theme_name;
-static flux::Theme g_theme;
+static fx::Theme g_theme;
 
 void printUsage(const char *program_name) {
   std::cout << "fx - A modern terminal file browser\n\n";
@@ -74,13 +79,11 @@ void printUsage(const char *program_name) {
 
 void suspendTerminal() {
 #ifndef _WIN32
-  // Use SIG_IGN instead of blocking - better for signal propagation
   struct sigaction ignore_action;
   ignore_action.sa_handler = SIG_IGN;
   sigemptyset(&ignore_action.sa_mask);
   ignore_action.sa_flags = 0;
 
-  // These will be restored when we resume
   sigaction(SIGWINCH, &ignore_action, nullptr);
   sigaction(SIGTSTP, &ignore_action, nullptr);
   sigaction(SIGCONT, &ignore_action, nullptr);
@@ -88,62 +91,54 @@ void suspendTerminal() {
   sigaction(SIGTTOU, &ignore_action, nullptr);
 #endif
 
-  // Save terminal mode
-  def_prog_mode();
-
-  // Clean up ncurses gracefully with neutral colors
-  if (!isendwin()) {
-    attrset(A_NORMAL);
-    bkgd(COLOR_PAIR(0));
-    clear();
-    refresh();
-    endwin();
+  // Stop notcurses completely
+  if (g_nc) {
+    notcurses_stop(g_nc);
+    g_nc = nullptr;
+    g_stdplane = nullptr;
   }
 
-  // Ensure clean terminal state
+  // Clean terminal output
   std::cout << "\033[0m"     // Reset all attributes
             << "\033[39;49m" // Default fg/bg colors
             << "\033[2J"     // Clear screen
             << "\033[H"      // Home cursor
             << "\033[?25h"   // Show cursor
             << std::flush;
-
-  // usleep(\1); // 5ms
 }
 
 void resumeTerminal() {
-  // Gently clear the screen
   std::cout << "\033[2J\033[H" << std::flush;
 
-  // Reinitialize ncurses
-  refresh();
-  reset_prog_mode();
+  // Reinitialize notcurses from scratch
+  struct notcurses_options opts = {.termtype = nullptr,
+                                   .loglevel = NCLOGLEVEL_SILENT,
+                                   .margin_t = 0,
+                                   .margin_r = 0,
+                                   .margin_b = 0,
+                                   .margin_l = 0,
+                                   .flags = NCOPTION_SUPPRESS_BANNERS |
+                                            NCOPTION_NO_CLEAR_BITMAPS};
 
-  // Reconfigure ncurses settings
-  cbreak();
-  noecho();
-  keypad(stdscr, TRUE);
-  curs_set(0);
-  set_escdelay(25);
+  g_nc = notcurses_init(&opts, nullptr);
+  if (!g_nc) {
+    std::cerr << "Failed to reinitialize notcurses\n";
+    return;
+  }
 
-  // Clear any pending input
-  flushinp();
+  g_stdplane = notcurses_stdplane(g_nc);
 
-  // Reapply colors and theme (OPTIMIZED - no file I/O)
-  if (has_colors() && g_theme_manager) {
-    start_color();
-    use_default_colors();
-
-    // Just reapply the cached theme directly - no disk access!
-    if (g_theme.background > 0) {
-      bkgd(COLOR_PAIR(g_theme.background));
+  // Reapply theme if available
+  if (g_theme_manager && !g_theme_name.empty()) {
+    auto theme_path = fx::ThemeLoader::findThemeFile(g_theme_name);
+    if (theme_path) {
+      auto def = fx::ThemeLoader::loadFromTOML(*theme_path);
+      g_theme = g_theme_manager->applyThemeDefinition(def);
     }
   }
 
-  // Force a clean redraw
-  clearok(stdscr, TRUE);
-  clear();
-  refresh();
+  // Force a refresh
+  notcurses_refresh(g_nc, nullptr, nullptr);
 
 #ifndef _WIN32
   // Unblock signals
@@ -218,35 +213,43 @@ int main(int argc, char *argv[]) {
   setup_terminal_attributes();
   setup_signal_handlers();
 
-  initscr();
-  cbreak();
-  noecho();
-  keypad(stdscr, TRUE);
-  curs_set(0);
-  set_escdelay(25);
+  struct notcurses_options opts = {
+      .termtype = nullptr,
+      .loglevel = NCLOGLEVEL_SILENT, // Use NCLOGLEVEL_DEBUG for debugging
+      .margin_t = 0,
+      .margin_r = 0,
+      .margin_b = 0,
+      .margin_l = 0,
+      .flags = NCOPTION_SUPPRESS_BANNERS | NCOPTION_NO_CLEAR_BITMAPS};
 
-  if (has_colors()) {
-    start_color();
-    use_default_colors();
+  notcurses *nc = notcurses_init(&opts, nullptr);
+  if (!nc) {
+    std::cerr << "Failed to initialize notcurses\n";
+    return 1;
   }
 
+  ncplane *stdplane = notcurses_stdplane(nc);
+
+  g_nc = nc;
+  g_stdplane = stdplane;
+
   flux::Browser browser(start_path);
-  flux::Renderer renderer;
+  fx::Renderer renderer(nc, stdplane); // ✨ Pass notcurses objects
 
   if (show_hidden)
     browser.toggleHidden();
 
-  flux::ThemeManager theme_manager;
-  flux::Theme theme;
+  fx::ThemeManager theme_manager;
+  fx::Theme theme;
 
   // Set up global variables for callbacks
   g_theme_manager = &theme_manager;
   g_theme_name = theme_name;
 
-  // Set up FileOpener callbacks ONCE at startup
   fx::FileOpener::setTerminalSuspendCallback(suspendTerminal);
   fx::FileOpener::setTerminalResumeCallback(resumeTerminal);
 
+  // Theme loading stays mostly the same
   auto theme_path = fx::ThemeLoader::findThemeFile(theme_name);
   if (theme_path) {
     std::cerr << "[fx] Loading theme: " << theme_name << " from " << *theme_path
@@ -254,192 +257,171 @@ int main(int argc, char *argv[]) {
     auto def = fx::ThemeLoader::loadFromTOML(*theme_path);
     theme = theme_manager.applyThemeDefinition(def);
     g_theme = theme;
-
-    if (def.background != "transparent" && def.background != "default" &&
-        !def.background.empty())
-      bkgd(COLOR_PAIR(theme.background));
+    // Note: No bkgd() call needed, notcurses handles this differently
   } else {
     std::cerr << "[fx] Theme '" << theme_name << "' not found, using default\n";
     theme = theme_manager.applyThemeDefinition(
-        flux::ThemeManager::getDefaultThemeDef());
+        fx::ThemeManager::getDefaultThemeDef());
     g_theme = theme;
-    bkgd(COLOR_PAIR(theme.background));
   }
 
   fx::InputPrompt::setTheme(theme);
   renderer.setTheme(theme);
-  renderer.setIconStyle(use_icons ? IconStyle::AUTO : IconStyle::ASCII);
+  renderer.setIconStyle(use_icons ? fx::IconStyle::AUTO : fx::IconStyle::ASCII);
 
-  int ch;
+  ncinput ni;
+  // int ch;
   bool running = true;
 
   while (running) {
     browser.updateScroll(renderer.getViewportHeight());
     renderer.render(browser);
-    ch = getch();
 
-    switch (ch) {
-    case KEY_UP:
-    case 'k':
+    // Get input
+    ncinput ni;
+    memset(&ni, 0, sizeof(ni));
+    uint32_t key = notcurses_get_blocking(nc, &ni);
+
+    // DEBUG: Log what we're receiving
+
+    // Handle error/interrupt
+    if (key == (uint32_t)-1) {
+
+      continue;
+    }
+
+    // CRITICAL: For special keys, ni.id is set and key might be 0
+    // For regular characters, key contains the character and ni.id might be 0
+
+    // Handle special keys first (these use ni.id)
+    if (ni.id == NCKEY_RESIZE) {
+      continue;
+    } else if (ni.id == NCKEY_UP) {
       browser.selectPrevious();
-      break;
-    case KEY_DOWN:
-    case 'j':
+    } else if (ni.id == NCKEY_DOWN) {
       browser.selectNext();
-      break;
-    case KEY_HOME:
-    case 'g':
-      browser.selectFirst();
-      break;
-    case KEY_END:
-    case 'G':
-      browser.selectLast();
-      break;
-    case KEY_PPAGE:
-    case CTRL('b'):
-      browser.pageUp(renderer.getViewportHeight());
-      break;
-    case KEY_NPAGE:
-    case CTRL('f'):
-      browser.pageDown(renderer.getViewportHeight());
-      break;
-    case KEY_LEFT:
-    case 'h':
+    } else if (ni.id == NCKEY_LEFT) {
       browser.navigateUp();
-      break;
-    case '.':
-    case 'H':
-      browser.toggleHidden();
-      break;
-    case 's':
-      browser.cycleSortMode();
-      break;
-    case 'R':
-    case KEY_F(5):
-      browser.refresh();
-      break;
-    case 'q':
-    case CTRL('q'):
-    case 27:
-      running = false;
-      break;
-    case KEY_RESIZE:
-      clearok(stdscr, TRUE);
-      break;
-    case KEY_RIGHT:
-    case KEY_ENTER:
-    case 10:
-    case 13: {
+    } else if (ni.id == NCKEY_RIGHT) {
       if (browser.isSelectedDirectory()) {
         browser.navigateInto(browser.getSelectedIndex());
       } else {
         const std::string selected_file = browser.getSelectedPath()->string();
-
-        // Save the current scroll position
         size_t saved_index = browser.getSelectedIndex();
-
         openFileWithHandler(selected_file, config);
-
-        // After returning, force the browser to recalculate scroll
         browser.updateScroll(renderer.getViewportHeight());
-        // Force a complete redraw
-        clearok(stdscr, TRUE);
-        clear();
-
-        // Refresh browser and renderer
         browser.refresh();
         browser.selectByIndex(saved_index);
         renderer.setTheme(g_theme);
       }
-      break;
+    } else if (ni.id == NCKEY_ENTER) {
+      if (browser.isSelectedDirectory()) {
+        browser.navigateInto(browser.getSelectedIndex());
+      } else {
+        const std::string selected_file = browser.getSelectedPath()->string();
+        size_t saved_index = browser.getSelectedIndex();
+        openFileWithHandler(selected_file, config);
+        browser.updateScroll(renderer.getViewportHeight());
+        browser.refresh();
+        browser.selectByIndex(saved_index);
+        renderer.setTheme(g_theme);
+      }
+    } else if (ni.id == NCKEY_HOME) {
+      browser.selectFirst();
+    } else if (ni.id == NCKEY_END) {
+      browser.selectLast();
+    } else if (ni.id == NCKEY_PGUP) {
+      browser.pageUp(renderer.getViewportHeight());
+    } else if (ni.id == NCKEY_PGDOWN) {
+      browser.pageDown(renderer.getViewportHeight());
+    } else if (ni.id == NCKEY_F05) {
+      browser.refresh();
     }
-
-    case 'a': // Create file
-    case 'n': {
-      auto name = fx::InputPrompt::getString("New file: ");
+    // Handle regular character keys (these use key, not ni.id)
+    else if (key == 'k') {
+      browser.selectPrevious();
+    } else if (key == 'j') {
+      browser.selectNext();
+    } else if (key == 'h') {
+      browser.navigateUp();
+    } else if (key == 'l' || key == 10 || key == 13) { // l or Enter
+      if (browser.isSelectedDirectory()) {
+        browser.navigateInto(browser.getSelectedIndex());
+      } else {
+        const std::string selected_file = browser.getSelectedPath()->string();
+        size_t saved_index = browser.getSelectedIndex();
+        openFileWithHandler(selected_file, config);
+        browser.updateScroll(renderer.getViewportHeight());
+        browser.refresh();
+        browser.selectByIndex(saved_index);
+        renderer.setTheme(g_theme);
+      }
+    } else if (key == 'g') {
+      browser.selectFirst();
+    } else if (key == 'G') {
+      browser.selectLast();
+    } else if (key == CTRL('b')) {
+      browser.pageUp(renderer.getViewportHeight());
+    } else if (key == CTRL('f')) {
+      browser.pageDown(renderer.getViewportHeight());
+    } else if (key == '.' || key == 'H') {
+      browser.toggleHidden();
+    } else if (key == 's') {
+      browser.cycleSortMode();
+    } else if (key == 'R') {
+      browser.refresh();
+    } else if (key == 'q' || key == CTRL('q') || key == 27) {
+      running = false;
+    } else if (key == 'a' || key == 'n') {
+      auto name = fx::InputPrompt::getString(nc, stdplane, "New file: ");
       if (name) {
         if (browser.createFile(*name)) {
-          // Success - file created and selected
+          // Success
         } else {
           const std::string selected_file = browser.getSelectedPath()->string();
           size_t saved_index = browser.getSelectedIndex();
-
           openFileWithHandler(selected_file, config);
-
-          // Restore position first, then update scroll
           browser.selectByIndex(saved_index);
           browser.updateScroll(renderer.getViewportHeight());
-
-          // Clean redraw
-          clearok(stdscr, TRUE);
-          clear();
           renderer.setTheme(g_theme);
         }
       }
-      break;
-    }
-    case 'A': // Create directory
-    case 'N': {
-      auto name = fx::InputPrompt::getString("New directory: ");
+    } else if (key == 'A' || key == 'N') {
+      auto name = fx::InputPrompt::getString(nc, stdplane, "New directory: ");
       if (name) {
         if (browser.createDirectory(*name)) {
-          // Success - directory created and selected
+          // Success
         } else {
-          // Show error
           std::string error = browser.getErrorMessage();
-          move(LINES - 1, 0);
-          clrtoeol();
-          attron(A_BOLD | COLOR_PAIR(1));
-          mvprintw(LINES - 1, 0, "Error: %s", error.c_str());
-          attroff(A_BOLD | COLOR_PAIR(1));
-          refresh();
-          napms(2000);
+          unsigned width, height;
+          ncplane_dim_yx(stdplane, &height, &width);
+          ncplane_cursor_move_yx(stdplane, height - 1, 0);
         }
       }
-      break;
-    }
-    case 'r': {
+    } else if (key == 'r') {
       const std::string default_name =
           browser.getEntryByIndex(browser.getSelectedIndex())->name;
-      auto name = fx::InputPrompt::getString("Rename: ", default_name);
+      auto name =
+          fx::InputPrompt::getString(nc, stdplane, "Rename: ", default_name);
       if (name) {
-        if (browser.renameEntry(browser.getSelectedIndex(), *name)) {
-          // Success
-        } else {
-          std::string error = browser.getErrorMessage();
-          move(LINES - 1, 0);
-          clrtoeol();
-          attron(A_BOLD | COLOR_PAIR(1)); // Assuming color pair 1 is red/error
-          mvprintw(LINES - 1, 0, "Error: %s", error.c_str());
-          attroff(A_BOLD | COLOR_PAIR(1));
-          refresh();
-          napms(2000); // Show error for 2 seconds
+        if (!browser.renameEntry(browser.getSelectedIndex(), *name)) {
+          // Handle error
         }
       }
-      break;
-    }
-    case 'd': {
-
+    } else if (key == 'd') {
       if (fx::InputPrompt::getConfirmation(
-              "Do you want to remove this file/folder? ")) {
-        if (browser.removeEntry(browser.getSelectedIndex())) {
-          // Success
-        } else {
-          std::string error = browser.getErrorMessage();
-          move(LINES - 1, 0);
-          clrtoeol();
-          attron(A_BOLD | COLOR_PAIR(1)); // Assuming color pair 1 is
-          mvprintw(LINES - 1, 0, "Error: %s", error.c_str());
-          attroff(A_BOLD | COLOR_PAIR(1));
-          refresh();
-          napms(2000); // Show error for 2 seconds
+              nc, stdplane, "Do you want to remove this file/folder? ")) {
+        if (!browser.removeEntry(browser.getSelectedIndex())) {
+          // Handle error
         }
       }
-    }
     }
   }
 
-  endwin();
+  notcurses_stop(nc);
+  g_nc = nullptr;
+  g_stdplane = nullptr;
+
   restore_terminal_attributes();
   return 0;
 }
@@ -522,7 +504,6 @@ void restore_terminal_attributes() {
 }
 
 #ifndef _WIN32
-// Add these global variables
 static volatile sig_atomic_t terminal_suspended = 0;
 
 void handle_sigtstp(int sig) {
@@ -543,11 +524,9 @@ void handle_sigcont(int sig) {
 }
 
 void handle_sigwinch(int sig) {
-  // Only handle resize if we're active
-  if (!terminal_suspended) {
-    endwin();
-    refresh();
-    clearok(stdscr, TRUE);
+  // Notcurses handles SIGWINCH internally, just trigger a refresh
+  if (!terminal_suspended && g_nc) {
+    notcurses_refresh(g_nc, nullptr, nullptr);
   }
 }
 #endif
