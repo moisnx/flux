@@ -25,10 +25,6 @@
 #define CTRL(c) ((c) & 0x1f)
 #endif
 
-#ifndef CTRL
-#define CTRL(c) ((c) & 0x1f)
-#endif
-
 void setup_terminal_attributes();
 void restore_terminal_attributes();
 void setup_signal_handlers();
@@ -69,13 +65,26 @@ void printUsage(const char *program_name) {
   std::cout << "  Commands are executed without shell interpretation\n";
   std::cout << "  Use --strict to enforce command whitelist\n\n";
   std::cout << "Keybindings:\n";
-  std::cout << "  j/k or ↑/↓       Navigate\n";
-  std::cout << "  h or ←           Parent directory\n";
-  std::cout << "  l or → or Enter  Open directory/file\n";
-  std::cout << "  g/G              Top/Bottom\n";
-  std::cout << "  .                Toggle hidden\n";
-  std::cout << "  s                Cycle sort mode\n";
-  std::cout << "  q                Quit\n";
+  std::cout << "  Navigation:\n";
+  std::cout << "    j/k or ↑/↓         Navigate up/down\n";
+  std::cout << "    h or ←             Parent directory\n";
+  std::cout << "    l or → or Enter    Open directory/file\n";
+  std::cout << "    g/G or Home/End    Jump to top/bottom\n";
+  std::cout << "    Ctrl+u / Ctrl+d    Half page up/down\n";
+  std::cout << "    Ctrl+b / Ctrl+f    Full page up/down\n";
+  std::cout << "    PgUp / PgDn        Page up/down\n\n";
+  std::cout << "  File Operations:\n";
+  std::cout << "    n                  Create new file\n";
+  std::cout << "    N                  Create new directory\n";
+  std::cout << "    r                  Rename selected item\n";
+  std::cout << "    d                  Delete selected item\n\n";
+  std::cout << "  View Options:\n";
+  std::cout << "    .                  Toggle hidden files\n";
+  std::cout << "    s                  Cycle sort mode\n";
+  std::cout << "    R or F5            Refresh directory\n";
+  std::cout << "    T                  Open theme selector\n\n";
+  std::cout << "  Exit:\n";
+  std::cout << "    q / Ctrl+q / Esc   Quit application\n";
 }
 
 void suspendTerminal() {
@@ -288,7 +297,7 @@ int main(int argc, char *argv[]) {
   g_stdplane = stdplane;
 
   flux::Browser browser(start_path);
-  fx::Renderer renderer(nc, stdplane); // ✨ Pass notcurses objects
+  fx::Renderer renderer(nc, stdplane);
 
   if (show_hidden)
     browser.toggleHidden();
@@ -306,14 +315,11 @@ int main(int argc, char *argv[]) {
   // Theme loading stays mostly the same
   auto theme_path = fx::ThemeLoader::findThemeFile(theme_name);
   if (theme_path) {
-    // std::cerr << "[fx] Loading theme: " << theme_name << " from " <<
-    // *theme_path
-    //           << "\n";
     auto def = fx::ThemeLoader::loadFromTOML(*theme_path);
     theme = theme_manager.applyThemeDefinition(def);
     g_theme = theme;
 
-    // ADD THIS: Set the background for the entire stdplane
+    // Set the background for the entire stdplane
     if (def.background != "transparent" && def.background != "default" &&
         !def.background.empty()) {
       uint64_t channels = 0;
@@ -331,7 +337,6 @@ int main(int argc, char *argv[]) {
   renderer.setIconStyle(use_icons ? fx::IconStyle::AUTO : fx::IconStyle::ASCII);
 
   ncinput ni;
-  // int ch;
   bool running = true;
 
   while (running) {
@@ -344,16 +349,9 @@ int main(int argc, char *argv[]) {
     memset(&ni, 0, sizeof(ni));
     uint32_t key = notcurses_get_blocking(nc, &ni);
 
-    // DEBUG: Log what we're receiving
-
-    // Handle error/interrupt
     if (key == (uint32_t)-1) {
-
       continue;
     }
-
-    // CRITICAL: For special keys, ni.id is set and key might be 0
-    // For regular characters, key contains the character and ni.id might be 0
 
     // Handle special keys first (these use ni.id)
     if (ni.id == NCKEY_RESIZE) {
@@ -424,11 +422,27 @@ int main(int argc, char *argv[]) {
       browser.selectFirst();
     } else if (key == 'G') {
       browser.selectLast();
-    } else if (key == CTRL('b')) {
+    }
+    // CHANGED: Ctrl+u for half page up, Ctrl+d for half page down
+    else if (key == CTRL('u')) {
+      int half_page = renderer.getViewportHeight() / 2;
+      for (int i = 0; i < half_page; ++i) {
+        browser.selectPrevious();
+      }
+    } else if (key == CTRL('d')) {
+      int half_page = renderer.getViewportHeight() / 2;
+      for (int i = 0; i < half_page; ++i) {
+        browser.selectNext();
+      }
+    }
+    // Keep Ctrl+b/f for full page
+    else if (key == CTRL('b')) {
       browser.pageUp(renderer.getViewportHeight());
     } else if (key == CTRL('f')) {
       browser.pageDown(renderer.getViewportHeight());
-    } else if (key == '.' || key == 'H') {
+    }
+    // CHANGED: Only . toggles hidden (removed H)
+    else if (key == '.') {
       browser.toggleHidden();
     } else if (key == 's') {
       browser.cycleSortMode();
@@ -436,7 +450,9 @@ int main(int argc, char *argv[]) {
       browser.refresh();
     } else if (key == 'q' || key == CTRL('q') || key == 27) {
       running = false;
-    } else if (key == 'a' || key == 'n') {
+    }
+    // CHANGED: Only 'n' for new file (removed 'a')
+    else if (key == 'n') {
       auto name = fx::InputPrompt::getString(nc, stdplane, "New file: ");
       if (name) {
         if (browser.createFile(*name)) {
@@ -450,7 +466,9 @@ int main(int argc, char *argv[]) {
           renderer.setTheme(g_theme);
         }
       }
-    } else if (key == 'A' || key == 'N') {
+    }
+    // CHANGED: Only 'N' for new directory (removed 'A')
+    else if (key == 'N') {
       auto name = fx::InputPrompt::getString(nc, stdplane, "New directory: ");
       if (name) {
         if (browser.createDirectory(*name)) {
@@ -479,7 +497,9 @@ int main(int argc, char *argv[]) {
           // Handle error
         }
       }
-    } else if (key == 't' || key == 'T') {
+    }
+    // CHANGED: Only 'T' for theme selector (removed 't')
+    else if (key == 'T') {
       // Show theme selector
       fx::ThemeSelector selector(nc, stdplane);
       auto selected_theme = selector.show(theme_name);
@@ -509,7 +529,6 @@ int main(int argc, char *argv[]) {
           ncplane_set_base(stdplane, " ", 0, channels);
 
           if (!fx::ConfigLoader::save_theme(selected_theme->name)) {
-
             std::cerr << "[fx] Warning: Could not save theme to config\n";
           }
         }
@@ -518,6 +537,12 @@ int main(int argc, char *argv[]) {
         browser.updateScroll(renderer.getViewportHeight());
       }
     }
+    // RESERVED for future features:
+    // 'a' - reserved for mark/select files
+    // 't' - reserved for tabs or tree view
+    // 'H' - reserved for home directory
+    // '/' - reserved for search/filter
+    // '?' - reserved for help overlay
   }
 
   notcurses_stop(nc);

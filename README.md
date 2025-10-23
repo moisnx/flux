@@ -99,23 +99,44 @@ fx --help
 
 ## ⌨️ Keybindings
 
-| Key                    | Action                      |
-| ---------------------- | --------------------------- |
-| `j` / `↓`              | Move down                   |
-| `k` / `↑`              | Move up                     |
-| `h` / `←`              | Go to parent directory      |
-| `l` / `→` / `Enter`    | Enter directory / open file |
-| `g`                    | Jump to top                 |
-| `G`                    | Jump to bottom              |
-| `.` / `H`              | Toggle hidden files         |
-| `s`                    | Cycle sort mode             |
-| `R` / `F5`             | Refresh directory           |
-| `a` / `n`              | Create new file             |
-| `A` / `N`              | Create new directory        |
-| `r`                    | Rename file/directory       |
-| `d`                    | Delete file/directory       |
-| `t` / `T`              | Theme selector              |
-| `q` / `Ctrl+Q` / `Esc` | Quit                        |
+### Navigation
+
+| Key                 | Action                      |
+| ------------------- | --------------------------- |
+| `j` / `↓`           | Move down                   |
+| `k` / `↑`           | Move up                     |
+| `h` / `←`           | Go to parent directory      |
+| `l` / `→` / `Enter` | Enter directory / open file |
+| `g` / `Home`        | Jump to top                 |
+| `G` / `End`         | Jump to bottom              |
+| `Ctrl+u`            | Half page up                |
+| `Ctrl+d`            | Half page down              |
+| `Ctrl+b` / `PgUp`   | Full page up                |
+| `Ctrl+f` / `PgDn`   | Full page down              |
+
+### File Operations
+
+| Key | Action                |
+| --- | --------------------- |
+| `n` | Create new file       |
+| `N` | Create new directory  |
+| `r` | Rename file/directory |
+| `d` | Delete file/directory |
+
+### View Options
+
+| Key        | Action              |
+| ---------- | ------------------- |
+| `.`        | Toggle hidden files |
+| `s`        | Cycle sort mode     |
+| `R` / `F5` | Refresh directory   |
+| `T`        | Theme selector      |
+
+### Exit
+
+| Key                    | Action |
+| ---------------------- | ------ |
+| `q` / `Ctrl+Q` / `Esc` | Quit   |
 
 ## 🎨 Themes
 
