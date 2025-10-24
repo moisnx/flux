@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <ncursesw/ncurses.h>
 #include <sys/stat.h>
 
 #ifdef _WIN32
@@ -552,7 +553,7 @@ bool Browser::removeEntry(size_t index) {
   return false;
 }
 
-bool Browser::executePaste(const std::vector<fs::path> &source_paths,
+bool Browser::executePaste(const std::vector<std::string> &source_paths,
                            bool is_cut) {
   clearError();
   if (source_paths.empty()) {
@@ -560,7 +561,19 @@ bool Browser::executePaste(const std::vector<fs::path> &source_paths,
     return false;
   }
 
-  for (size_t i = 0; i < source_paths.size(); i++) {
+  try {
+    for (size_t i = 0; i < source_paths.size(); i++) {
+      std::filesystem::copy(source_paths[i], getCurrentPath().string());
+      refresh();
+      for (size_t i = 0; i < entries_.size(); ++i) {
+        selected_index_ = i;
+        break;
+      }
+    }
+    return true;
+  } catch (const std::exception &e) {
+    setError(std::string("Something went wrong while pasting files: ") +
+             e.what());
+    return false;
   }
-  return false;
 }

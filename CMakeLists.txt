@@ -29,6 +29,12 @@ if(WIN32)
     endif()
 endif()
 
+
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+endif()
+
 # ============================================
 # Find Notcurses (Required for all builds)
 # ============================================
@@ -129,6 +135,7 @@ if(BUILD_STANDALONE)
         fx/src/ui/icon_provider.cpp
         fx/src/ui/theme.cpp
         fx/src/ui/theme_selector.cpp
+        fx/src/ui/notification.cpp
     )
 
     add_executable(fx ${STANDALONE_SOURCES})

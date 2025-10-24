@@ -1,6 +1,3 @@
-#ifndef FILE_CLIPBOARD_H
-#define FILE_CLIPBOARD_H
-
 #pragma once
 
 #include <ctime>
@@ -33,5 +30,3 @@ private:
 };
 
 } // namespace flux
-
-#endif

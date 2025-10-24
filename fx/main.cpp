@@ -1,16 +1,21 @@
+#include "flux/core/file_clipboard.h"
 #include "include/config_loader.hpp"
 #include "include/file_opener.hpp"
 #include "include/input_prompt.hpp"
 #include "include/theme_loader.hpp"
+#include "include/ui/notification.hpp"
 #include "include/ui/renderer.hpp"
 #include "include/ui/theme.hpp"
 #include "include/ui/theme_selector.hpp"
 
+#include <chrono>
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <flux.h>
 #include <iostream>
+#include <vector>
 
 // REPLACE ncurses includes with notcurses
 #ifdef _WIN32
@@ -44,6 +49,7 @@ static struct sigaction original_sigcont;
 static notcurses *g_nc = nullptr;
 static ncplane *g_stdplane = nullptr;
 static fx::ThemeManager *g_theme_manager = nullptr;
+static fx::NotificationManager *g_notif_manager = nullptr;
 static std::string g_theme_name;
 static fx::Theme g_theme;
 
@@ -101,6 +107,11 @@ void suspendTerminal() {
   sigaction(SIGTTOU, &ignore_action, nullptr);
 #endif
 
+  // IMPORTANT: Clean up notification manager's plane first
+  if (g_notif_manager) {
+    g_notif_manager->cleanup(); // Add this method
+  }
+
   // Stop notcurses completely to give terminal to external program
   if (g_nc) {
     notcurses_stop(g_nc);
@@ -111,7 +122,7 @@ void suspendTerminal() {
 
 void resumeTerminal() {
   // Wait for terminal to settle after external program exits
-  usleep(50000);
+  usleep(100000); // Increased from 50000 to 100000
 
   bool has_truecolor = false;
   if (const char *colorterm = std::getenv("COLORTERM")) {
@@ -119,20 +130,15 @@ void resumeTerminal() {
     has_truecolor = (ct == "truecolor" || ct == "24bit");
   }
 
-  // Only set termtype if we're confident it's supported
-  // Let notcurses auto-detect for most terminals
   const char *termtype = nullptr;
 
-  // Only override for terminals we know support xterm-direct
   if (has_truecolor) {
     if (const char *term = std::getenv("TERM")) {
       std::string t = term;
-      // Only use xterm-direct for known-good terminals
       if (t.find("kitty") != std::string::npos ||
           t.find("konsole") != std::string::npos || t == "xterm-direct") {
         termtype = "xterm-direct";
       }
-      // For other terminals with truecolor, let notcurses auto-detect
     }
   }
 
@@ -147,10 +153,21 @@ void resumeTerminal() {
                                             NCOPTION_NO_CLEAR_BITMAPS};
 
   g_nc = notcurses_init(&opts, nullptr);
-  if (!g_nc)
+  if (!g_nc) {
+    std::cerr << "Failed to reinitialize notcurses\n";
     return;
+  }
 
   g_stdplane = notcurses_stdplane(g_nc);
+  if (!g_stdplane) {
+    std::cerr << "Failed to get stdplane\n";
+    return;
+  }
+
+  // Update notification manager BEFORE doing anything else
+  if (g_notif_manager) {
+    g_notif_manager->updateNotcursesPointer(g_nc);
+  }
 
   // Reapply theme
   if (g_theme_manager && !g_theme_name.empty()) {
@@ -332,32 +349,84 @@ int main(int argc, char *argv[]) {
       ncplane_set_base(stdplane, " ", 0, channels);
     }
   }
+
+  fx::NotificationManager notif_manager(nc, theme);
+
+  g_notif_manager = &notif_manager;
+
+  fx::StatusBar status_bar(theme);
   fx::InputPrompt::setTheme(theme);
   renderer.setTheme(theme);
   renderer.setIconStyle(use_icons ? fx::IconStyle::AUTO : fx::IconStyle::ASCII);
 
   ncinput ni;
   bool running = true;
+  bool needs_render = true; // Browser content needs re-render
+  // bool  // Notifications need re-render
+  static char last_key = 0;
+  static auto last_key_time = std::chrono::steady_clock::now();
 
   while (running) {
-    browser.updateScroll(renderer.getViewportHeight());
-    ncplane_erase(stdplane);
-    renderer.render(browser);
+    if (needs_render) {
+      browser.updateScroll(renderer.getViewportHeight());
+      ncplane_erase(stdplane);
+      renderer.render(browser);
+      notif_manager.render(stdplane, fx::NotificationPosition::BOTTOM);
+      notcurses_render(nc);
+      needs_render = false;
+    }
 
-    // Get input
     ncinput ni;
     memset(&ni, 0, sizeof(ni));
-    uint32_t key = notcurses_get_blocking(nc, &ni);
 
-    if (key == (uint32_t)-1) {
+    // Calculate timeout to next notification expiry
+    struct timespec timeout;
+    auto next_expiry = notif_manager.getNextExpiryTime();
+
+    if (next_expiry.has_value()) {
+      auto now = std::chrono::steady_clock::now();
+      auto wait_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           *next_expiry - now)
+                           .count();
+
+      if (wait_time <= 0) {
+        // Notification expired - prune and re-render ONCE
+        notif_manager.pruneExpired();
+        needs_render = true;
+        continue;
+      }
+
+      timeout.tv_sec = wait_time / 1000;
+      timeout.tv_nsec = (wait_time % 1000) * 1000000;
+    } else {
+      // No notifications, block indefinitely
+      timeout.tv_sec = 3600;
+      timeout.tv_nsec = 0;
+    }
+
+    uint32_t key = notcurses_get(nc, &timeout, &ni);
+
+    // Timeout - check for expired notifications
+    if (key == (uint32_t)-1 || key == 0) {
+      size_t before = notif_manager.getNotificationCount();
+      notif_manager.pruneExpired();
+      size_t after = notif_manager.getNotificationCount();
+
+      if (before != after) {
+        needs_render = true;
+      }
       continue;
     }
 
-    // Handle special keys first (these use ni.id)
+    // Browser navigation - only browser needs re-render
+    needs_render = true; // Default for most keys
+
+    // Handle special keys
     if (ni.id == NCKEY_RESIZE) {
       ncplane_erase(stdplane);
       browser.updateScroll(renderer.getViewportHeight());
-      continue;
+      notif_manager.handleResize();
+      needs_render = true;
     } else if (ni.id == NCKEY_UP) {
       browser.selectPrevious();
     } else if (ni.id == NCKEY_DOWN) {
@@ -375,6 +444,7 @@ int main(int argc, char *argv[]) {
         browser.refresh();
         browser.selectByIndex(saved_index);
         renderer.setTheme(g_theme);
+        notif_manager.setTheme(g_theme);
       }
     } else if (ni.id == NCKEY_ENTER) {
       if (browser.isSelectedDirectory()) {
@@ -387,6 +457,7 @@ int main(int argc, char *argv[]) {
         browser.refresh();
         browser.selectByIndex(saved_index);
         renderer.setTheme(g_theme);
+        notif_manager.setTheme(g_theme);
       }
     } else if (ni.id == NCKEY_HOME) {
       browser.selectFirst();
@@ -398,15 +469,17 @@ int main(int argc, char *argv[]) {
       browser.pageDown(renderer.getViewportHeight());
     } else if (ni.id == NCKEY_F05) {
       browser.refresh();
+      notif_manager.success("Directory refreshed", 1500);
+      // New notification added
     }
-    // Handle regular character keys (these use key, not ni.id)
+    // Handle regular character keys
     else if (key == 'k') {
       browser.selectPrevious();
     } else if (key == 'j') {
       browser.selectNext();
     } else if (key == 'h') {
       browser.navigateUp();
-    } else if (key == 'l' || key == 10 || key == 13) { // l or Enter
+    } else if (key == 'l' || key == 10 || key == 13) {
       if (browser.isSelectedDirectory()) {
         browser.navigateInto(browser.getSelectedIndex());
       } else {
@@ -417,14 +490,13 @@ int main(int argc, char *argv[]) {
         browser.refresh();
         browser.selectByIndex(saved_index);
         renderer.setTheme(g_theme);
+        notif_manager.setTheme(g_theme);
       }
     } else if (key == 'g') {
       browser.selectFirst();
     } else if (key == 'G') {
       browser.selectLast();
-    }
-    // CHANGED: Ctrl+u for half page up, Ctrl+d for half page down
-    else if (key == CTRL('u')) {
+    } else if (key == CTRL('u')) {
       int half_page = renderer.getViewportHeight() / 2;
       for (int i = 0; i < half_page; ++i) {
         browser.selectPrevious();
@@ -434,50 +506,61 @@ int main(int argc, char *argv[]) {
       for (int i = 0; i < half_page; ++i) {
         browser.selectNext();
       }
-    }
-    // Keep Ctrl+b/f for full page
-    else if (key == CTRL('b')) {
+    } else if (key == CTRL('b')) {
       browser.pageUp(renderer.getViewportHeight());
     } else if (key == CTRL('f')) {
       browser.pageDown(renderer.getViewportHeight());
-    }
-    // CHANGED: Only . toggles hidden (removed H)
-    else if (key == '.') {
+    } else if (key == '.') {
       browser.toggleHidden();
+      notif_manager.info("Hidden files toggled", 1500);
+      // New notification
     } else if (key == 's') {
       browser.cycleSortMode();
+      notif_manager.info("Sort mode changed", 1500);
+      // New notification
     } else if (key == 'R') {
       browser.refresh();
-    } else if (key == 'q' || key == CTRL('q') || key == 27) {
+      notif_manager.success("Directory refreshed", 1500);
+      // New notification
+    } else if (key == 'q' || key == CTRL('q')) {
       running = false;
+      needs_render = false; // Don't render on exit
     }
-    // CHANGED: Only 'n' for new file (removed 'a')
-    else if (key == 'n') {
+    // Handle ESC
+    else if (key == 27) {
+      auto now = std::chrono::steady_clock::now();
+      auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                         now - last_key_time)
+                         .count();
+
+      if (last_key != 27 || elapsed > 300) {
+        running = false;
+        needs_render = false;
+      }
+      last_key = 27;
+      last_key_time = now;
+    } else if (key == 'n') {
       auto name = fx::InputPrompt::getString(nc, stdplane, "New file: ");
+
       if (name) {
         if (browser.createFile(*name)) {
-          // Success
+          notif_manager.success("Created file: " + *name);
+          // New notification
         } else {
-          const std::string selected_file = browser.getSelectedPath()->string();
-          size_t saved_index = browser.getSelectedIndex();
-          openFileWithHandler(selected_file, config);
-          browser.selectByIndex(saved_index);
-          browser.updateScroll(renderer.getViewportHeight());
-          renderer.setTheme(g_theme);
+          notif_manager.error(
+              "Failed to create file: " + browser.getErrorMessage(), 5000);
         }
       }
-    }
-    // CHANGED: Only 'N' for new directory (removed 'A')
-    else if (key == 'N') {
+
+    } else if (key == 'N') {
       auto name = fx::InputPrompt::getString(nc, stdplane, "New directory: ");
       if (name) {
         if (browser.createDirectory(*name)) {
-          // Success
+          notif_manager.success("Created directory: " + *name);
+
         } else {
-          std::string error = browser.getErrorMessage();
-          unsigned width, height;
-          ncplane_dim_yx(stdplane, &height, &width);
-          ncplane_cursor_move_yx(stdplane, height - 1, 0);
+          notif_manager.error(
+              "Failed to create directory: " + browser.getErrorMessage(), 5000);
         }
       }
     } else if (key == 'r') {
@@ -486,36 +569,70 @@ int main(int argc, char *argv[]) {
       auto name =
           fx::InputPrompt::getString(nc, stdplane, "Rename: ", default_name);
       if (name) {
-        if (!browser.renameEntry(browser.getSelectedIndex(), *name)) {
-          // Handle error
+        if (browser.renameEntry(browser.getSelectedIndex(), *name)) {
+          notif_manager.success("Renamed to: " + *name);
+
+        } else {
+          notif_manager.error("Failed to rename: " + browser.getErrorMessage(),
+                              5000);
         }
       }
     } else if (key == 'd') {
-      if (fx::InputPrompt::getConfirmation(
-              nc, stdplane, "Do you want to remove this file/folder? ")) {
-        if (!browser.removeEntry(browser.getSelectedIndex())) {
-          // Handle error
+      auto now = std::chrono::steady_clock::now();
+      auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                         now - last_key_time)
+                         .count();
+
+      if (last_key == 'd' && elapsed < 500) {
+        const std::string filename =
+            browser.getEntryByIndex(browser.getSelectedIndex())->name;
+
+        ncplane_erase(stdplane);
+        renderer.render(browser);
+        notcurses_render(nc);
+
+        bool confirmed = fx::MessageBox::confirm(
+            nc, stdplane, "Delete File",
+            "Are you sure you want to delete '" + filename + "'?", theme);
+
+        if (confirmed) {
+          if (browser.removeEntry(browser.getSelectedIndex())) {
+            notif_manager.success("Deleted: " + filename);
+
+          } else {
+            notif_manager.error(
+                "Failed to delete: " + browser.getErrorMessage(), 5000);
+          }
+        } else {
+          notif_manager.info("Delete cancelled", 2000);
         }
+
+        last_key = 0;
+      } else {
+        last_key = 'd';
+        last_key_time = now;
+        notif_manager.hint("Press 'd' again to delete", 1500);
+        // New notification
       }
-    }
-    // CHANGED: Only 'T' for theme selector (removed 't')
-    else if (key == 'T') {
-      // Show theme selector
+    } else if (key == 'T') {
+      ncplane_erase(stdplane);
+      renderer.render(browser);
+      notcurses_render(nc);
+
       fx::ThemeSelector selector(nc, stdplane);
       auto selected_theme = selector.show(theme_name);
 
       if (selected_theme) {
-        // Update global theme name
         g_theme_name = selected_theme->name;
         theme_name = selected_theme->name;
-
-        // Apply the new theme
         theme = theme_manager.applyThemeDefinition(selected_theme->definition);
         g_theme = theme;
+
         fx::InputPrompt::setTheme(theme);
         renderer.setTheme(theme);
+        notif_manager.setTheme(theme);
+        status_bar.setTheme(theme);
 
-        // Update background
         if (selected_theme->definition.background != "transparent" &&
             selected_theme->definition.background != "default" &&
             !selected_theme->definition.background.empty()) {
@@ -529,21 +646,53 @@ int main(int argc, char *argv[]) {
           ncplane_set_base(stdplane, " ", 0, channels);
 
           if (!fx::ConfigLoader::save_theme(selected_theme->name)) {
-            std::cerr << "[fx] Warning: Could not save theme to config\n";
+            notif_manager.warning("Theme applied but not saved", 3000);
+
+          } else {
+            notif_manager.success("Theme: " + selected_theme->name);
           }
         }
-
-        // Refresh display
         browser.updateScroll(renderer.getViewportHeight());
       }
+
+      last_key = 0;
+    } else if (key == 'Y') {
+      bool copied =
+          flux::FileClipboard::copyFiles({browser.getSelectedPath()->string()});
+
+      if (copied) {
+        const std::string filename =
+            browser.getEntryByIndex(browser.getSelectedIndex())->name;
+        notif_manager.success("Copied: " + filename);
+
+      } else {
+        notif_manager.error("Failed to copy file", 3000);
+      }
+    } else if (key == 'p') {
+      std::vector<std::string> paths = flux::FileClipboard::getFiles();
+      if (paths.empty()) {
+        notif_manager.warning("Clipboard is empty");
+
+      } else if (browser.executePaste(paths, false)) {
+        notif_manager.success("Pasted " + std::to_string(paths.size()) +
+                              " item(s)");
+
+      } else {
+        notif_manager.error("Failed to paste: " + browser.getErrorMessage(),
+                            5000);
+      }
+    } else {
+      // Unknown key - don't re-render anything
+      needs_render = false;
     }
-    // RESERVED for future features:
-    // 'a' - reserved for mark/select files
-    // 't' - reserved for tabs or tree view
-    // 'H' - reserved for home directory
-    // '/' - reserved for search/filter
-    // '?' - reserved for help overlay
   }
+
+  // RESERVED for future features:
+  // 'a' - reserved for mark/select files
+  // 't' - reserved for tabs or tree view
+  // 'H' - reserved for home directory
+  // '/' - reserved for search/filter
+  // '?' - reserved for help overlay
 
   notcurses_stop(nc);
   g_nc = nullptr;

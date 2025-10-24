@@ -328,6 +328,8 @@ void IconProvider::initializeNerdFontMap() {
   nerd_font_map_[".bak"] = "\uf15c";
   nerd_font_map_[".swp"] = "\uf15c";
   nerd_font_map_[".swo"] = "\uf15c";
+
+  // UI Related Icons
 }
 
 std::string IconProvider::getFileExtension(const std::string &filename) const {

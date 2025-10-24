@@ -81,13 +81,14 @@ public:
   void updateScroll(size_t viewport_height);
 
   // File actions
-  bool deleteFile(size_t index);
+  // bool deleteFile(size_t index);
   bool createFile(const std::string &name);
   bool createDirectory(const std::string &name);
   bool renameEntry(size_t index, const std::string &new_name);
   bool removeEntry(size_t index);
+  // bool executePaste(const std::vector<fs::path> &source_paths, bool is_cut);
 
-  bool executePaste(const std::vector<fs::path> &source_paths, bool is_cut);
+  bool executePaste(const std::vector<std::string> &source_paths, bool is_cut);
 
   // Statistics
   size_t getDirectoryCount() const;

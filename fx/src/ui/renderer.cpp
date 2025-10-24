@@ -359,62 +359,53 @@ void Renderer::renderStatus(const Browser &browser) {
   // Status line
   ncplane_cursor_move_yx(stdplane_, status_y, 0);
 
-  if (browser.hasError()) {
-    setColors(theme_.ui_error, theme_.background);
-    ncplane_putstr(stdplane_, " ! ");
-    ncplane_set_styles(stdplane_, NCSTYLE_BOLD);
-    ncplane_putstr(stdplane_, browser.getErrorMessage().c_str());
-    ncplane_set_styles(stdplane_, NCSTYLE_NONE);
-    clearToEOL();
-  } else {
-    size_t selected = browser.getSelectedIndex() + 1;
-    size_t total = browser.getTotalEntries();
+  size_t selected = browser.getSelectedIndex() + 1;
+  size_t total = browser.getTotalEntries();
 
-    setColors(theme_.foreground, theme_.status_bar);
-    ncplane_putstr(stdplane_, " ");
+  setColors(theme_.foreground, theme_.status_bar);
+  ncplane_putstr(stdplane_, " ");
 
-    setColors(theme_.status_bar_active, theme_.status_bar);
-    ncplane_set_styles(stdplane_, NCSTYLE_BOLD);
-    ncplane_printf(stdplane_, "%zu", selected);
-    ncplane_set_styles(stdplane_, NCSTYLE_NONE);
+  setColors(theme_.status_bar_active, theme_.status_bar);
+  ncplane_set_styles(stdplane_, NCSTYLE_BOLD);
+  ncplane_printf(stdplane_, "%zu", selected);
+  ncplane_set_styles(stdplane_, NCSTYLE_NONE);
 
-    setColors(theme_.foreground, theme_.status_bar);
-    ncplane_putstr(stdplane_, "/");
+  setColors(theme_.foreground, theme_.status_bar);
+  ncplane_putstr(stdplane_, "/");
 
-    setColors(theme_.ui_secondary, theme_.status_bar);
-    ncplane_printf(stdplane_, "%zu", total);
+  setColors(theme_.ui_secondary, theme_.status_bar);
+  ncplane_printf(stdplane_, "%zu", total);
 
-    if (browser.getShowHidden()) {
-      setColors(theme_.foreground, theme_.status_bar);
-      ncplane_putstr(stdplane_, "  ");
-      setColors(theme_.ui_warning, theme_.status_bar);
-      ncplane_putstr(stdplane_, "[hidden]");
-    }
-
+  if (browser.getShowHidden()) {
     setColors(theme_.foreground, theme_.status_bar);
     ncplane_putstr(stdplane_, "  ");
-    setColors(theme_.ui_secondary, theme_.status_bar);
-    ncplane_putstr(stdplane_, "sort: ");
-
-    setColors(theme_.status_bar_active, theme_.status_bar);
-    switch (browser.getSortMode()) {
-    case Browser::SortMode::NAME:
-      ncplane_putstr(stdplane_, "name");
-      break;
-    case Browser::SortMode::SIZE:
-      ncplane_putstr(stdplane_, "size");
-      break;
-    case Browser::SortMode::DATE:
-      ncplane_putstr(stdplane_, "date");
-      break;
-    case Browser::SortMode::TYPE:
-      ncplane_putstr(stdplane_, "type");
-      break;
-    }
-
-    setColors(theme_.foreground, theme_.status_bar);
-    clearToEOL();
+    setColors(theme_.ui_warning, theme_.status_bar);
+    ncplane_putstr(stdplane_, "[hidden]");
   }
+
+  setColors(theme_.foreground, theme_.status_bar);
+  ncplane_putstr(stdplane_, "  ");
+  setColors(theme_.ui_secondary, theme_.status_bar);
+  ncplane_putstr(stdplane_, "sort: ");
+
+  setColors(theme_.status_bar_active, theme_.status_bar);
+  switch (browser.getSortMode()) {
+  case Browser::SortMode::NAME:
+    ncplane_putstr(stdplane_, "name");
+    break;
+  case Browser::SortMode::SIZE:
+    ncplane_putstr(stdplane_, "size");
+    break;
+  case Browser::SortMode::DATE:
+    ncplane_putstr(stdplane_, "date");
+    break;
+  case Browser::SortMode::TYPE:
+    ncplane_putstr(stdplane_, "type");
+    break;
+  }
+
+  setColors(theme_.foreground, theme_.status_bar);
+  clearToEOL();
 
   // Help line
   status_y++;
